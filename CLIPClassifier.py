@@ -5,22 +5,22 @@ import torch
 import matplotlib.pyplot as plt
 from sklearn.metrics import classification_report
 from torch.utils.data import DataLoader
-from data.datasets import Remote14
+from datasets import Remote14
 from tqdm import tqdm
 from transformers import CLIPProcessor, CLIPModel
 import random
 import torch.nn as nn
 import torch.optim as optim
-from utils.clip_adapter import clip
+#from utils.clip_adapter import clip
 from adapter import Adapter
 from tqdm import tqdm
 from torch.utils.tensorboard import SummaryWriter
 from warmup_scheduler import GradualWarmupScheduler
 
 class CLIPClassifier:
-    def __init__(self, device: torch.device, bs: int = 16, model_name: str = 'openai/clip-vit-base-patch32') -> None:
-        self.save_path = 'adapter.pth'
-        self.load_path = 'ckpts/adapter_noAugmentation_1fct.pth'
+    def __init__(self, device: torch.device, bs: int, model_name: str) -> None:
+        self.save_path = 'ckpts/adapter.pth'
+        self.load_path = 'ckpts/adapter.pth'
         self.device = device
         self.model_name = model_name
         self.model = CLIPModel.from_pretrained(self.model_name).to(device)
@@ -57,7 +57,7 @@ class CLIPClassifier:
         self.metrics = self._reset_metrics()
 
         self.adapter = Adapter().to(device)
-        self.optimizer = optim.Adam(self.adapter.parameters(), lr=1e-1, weight_decay=1e-4)
+        self.optimizer = optim.Adam(self.adapter.parameters(), lr=1e-2, weight_decay=1e-4)
         self.criterion = nn.CrossEntropyLoss()
 
         self.warmup_epochs=3
@@ -204,6 +204,10 @@ class CLIPClassifier:
             self.metrics[split]['preds'].extend(predicted_classes.tolist())
             self.metrics[split]['gts'].extend(labels.cpu().tolist())
 
+
+            acc = sum([1 for gt, pred in zip(self.metrics[split]['gts'], self.metrics[split]['preds']) if gt == pred]) / len(self.metrics[split]['gts'])
+            print(f"Accuracy: {acc}")
+
             fig, axes = plt.subplots(nrows=1, ncols=len(images), figsize=(20, 20))
             for i in range(len(images)):
                 img = images[i].cpu()
@@ -220,11 +224,6 @@ class CLIPClassifier:
                 ax.axis('off')
 
             plt.show()
-
-            print(self.metrics)
-
-            #if batch_counter % 1 == 0:
-            #    print(classification_report(self.metrics[split]['gts'], self.metrics[split]['preds'], target_names=self.classes))
 
         self._reset_metrics()
 
@@ -278,7 +277,7 @@ class CLIPClassifier:
                     images, labels = batch
                     images, labels = images.to(self.device), labels.to(self.device)
 
-                    inputs = self.processor(images=images, return_tensors="pt").to(self.device)
+                    inputs = self.processor(images=images, return_tensors="pt", do_rescale=False).to(self.device)
                     embeds = self.model.get_image_features(**inputs)
                     embeds = embeds / embeds.norm(p=2, dim=-1, keepdim=True)
                     image_features = self.adapter(embeds)
@@ -298,16 +297,8 @@ class CLIPClassifier:
                     val_loss = self.criterion(cos_sim, labels.to(self.device))
                     val_losses.append(val_loss.item())
 
-            # Calculate and log classification metrics
-            train_report = classification_report(self.metrics['train']['gts'], self.metrics['train']['preds'], target_names=self.classes, output_dict=True)
-            test_report = classification_report(self.metrics['val']['gts'], self.metrics['val']['preds'], target_names=self.classes, output_dict=True)
-            for metric, value in train_report.items():
-                if (metric == 'accuracy'):
-                    train_acc = value
-            for metric, value in test_report.items():
-                if (metric == 'accuracy'):
-                    val_acc = value
-            
+            train_acc = sum([1 for gt, pred in zip(self.metrics['train']['gts'], self.metrics['train']['preds']) if gt == pred]) / len(self.metrics['train']['gts'])
+            val_acc = sum([1 for gt, pred in zip(self.metrics['val']['gts'], self.metrics['val']['preds']) if gt == pred]) / len(self.metrics['val']['gts'])
             self.writer.add_scalars('Acc', {'Train': train_acc, 'Validation': val_acc}, epoch)
 
             mean_val_loss = sum(val_losses) / len(val_losses)
@@ -324,18 +315,14 @@ class CLIPClassifier:
             self.metrics = self._reset_metrics()
 
 if __name__ == '__main__':
-    model_name = 'openai/clip-vit-base-patch16'  # 'openai/clip-vit-base-patch32' or 'openai/clip-vit-base-patch16'
+    model_name = 'openai/clip-vit-base-patch16'  
     print(f' Model: {model_name}')
     device = torch.device("cuda") if torch.cuda.is_available() else torch.device("cpu")
-
-    #with torch.no_grad():
-    # subsets = [d for d in os.listdir('data/remote14') if os.path.isdir(os.path.join('data/remote14', d))]
 
     clip_classifier = CLIPClassifier(device, model_name=model_name, bs=8)
 
     #clip_classifier.classify_zeroshot(split='train' )
     #clip_classifier.classify_fewshotshot(split='train')
 
-    #clip_classifier.train_adapter(epochs=50)
-
-    clip_classifier.classify_withadapter(split='test')
+    # clip_classifier.train_adapter(epochs=50)
+    clip_classifier.classify_withadapter(split='val')
