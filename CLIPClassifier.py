@@ -1,0 +1,323 @@
+from typing import List, Dict
+import os
+from PIL import Image
+import torch
+from sklearn.metrics import classification_report
+from torch.utils.data import DataLoader
+from data.datasets import Remote14
+from tqdm import tqdm
+from transformers import CLIPProcessor, CLIPModel
+import random
+import torch.nn as nn
+import torch.optim as optim
+from utils.clip_adapter import clip
+from adapter import Adapter
+from tqdm import tqdm
+from torch.utils.tensorboard import SummaryWriter
+
+from warmup_scheduler import GradualWarmupScheduler
+
+class CLIPClassifier:
+    def __init__(self, device: torch.device, bs: int = 16, model_name: str = 'openai/clip-vit-base-patch32') -> None:
+        self.save_path = 'adapter.pth'
+        self.load_path = 'adapter_augmentation_1fct.pth'
+        self.device = device
+        self.model_name = model_name
+        self.model = CLIPModel.from_pretrained(self.model_name).to(device)
+        self.processor = CLIPProcessor.from_pretrained(self.model_name)
+        self.writer = SummaryWriter()
+
+        self.image_dir = 'data/remote14'
+        self.train_dataset = Remote14(root_dir=self.image_dir, is_train=True)
+        self.val_dataset = Remote14(root_dir=self.image_dir, is_val=True)
+        self.test_dataset = Remote14(root_dir=self.image_dir, is_test=True)
+
+        self.train_loader = DataLoader(
+                                self.train_dataset,
+                                batch_size=bs,
+                                shuffle=True,
+                                pin_memory=True
+                            )
+        self.val_loader = DataLoader(
+                                self.val_dataset,
+                                batch_size=bs,
+                                shuffle=False,
+                                pin_memory=True
+                            )
+        self.test_loader = DataLoader(
+                                self.test_dataset,
+                                batch_size=bs,
+                                shuffle=False,
+                                pin_memory=True
+                            )
+
+        self.classes = self.train_dataset.classes
+        self.questions = self._prepare_multiple_prompt()
+        self.class_anchors = self._prepare_anchors(2)
+        self.metrics = self._reset_metrics()
+
+        self.adapter = Adapter().to(device)
+        self.optimizer = optim.Adam(self.adapter.parameters(), lr=1e-1, weight_decay=1e-4)
+        self.criterion = nn.CrossEntropyLoss()
+
+        self.warmup_epochs=3
+        self.scheduler_cosine = torch.optim.lr_scheduler.CosineAnnealingLR(self.optimizer, T_max=3, eta_min=1e-6)
+        self.scheduler = GradualWarmupScheduler(self.optimizer, multiplier=1, total_epoch=self.warmup_epochs, after_scheduler=self.scheduler_cosine)
+
+    def _reset_metrics(self) -> Dict[str, Dict[str, List[int]]]:
+        self.metrics = {'train': {'gts': [], 'preds': []}, 'val': {'gts': [], 'preds': []}, 'test': {'gts': [], 'preds': []}}
+        return self.metrics
+    
+    def _prepare_multiple_prompt(self) -> List[str]:
+        questions = [f"A remote control device observed from {CLASS_NAME} direction." for CLASS_NAME in self.classes]
+        #questions.extend([f"A remote observed from {CLASS_NAME} direction." for CLASS_NAME in self.classes])
+        #questions.extend([f"A photo of remote taken from {CLASS_NAME} direction." for CLASS_NAME in self.classes])
+        return questions
+
+    def classify_zeroshot(self, split: str = 'train') -> None:
+        dataloader = self.train_loader if split == 'train' else self.test_loader
+
+        batch_counter = 0
+        for batch in dataloader:
+            batch_counter += 1
+            images, label = batch
+
+            texts = self._prepare_multiple_prompt()
+            print("texts", texts)
+
+            inputs = self.processor(texts, images, return_tensors="pt", padding=True)
+            inputs.to(self.model.device)
+            outputs = self.model(**inputs)
+            logits_per_image = outputs.logits_per_image
+
+            probs = logits_per_image.softmax(dim=1)
+            preds = probs.argmax(dim=-1)
+            preds = preds % len(self.classes)
+
+            gt_classes = torch.tensor(label).to(self.model.device)
+
+            self.metrics[split]['gts'].extend(gt_classes.cpu().tolist())
+            self.metrics[split]['preds'].extend(preds.cpu().tolist())
+            print(self.metrics)
+
+            if batch_counter % 1 == 0:
+                print(classification_report(self.metrics[split]['gts'], self.metrics[split]['preds'], target_names=self.classes))
+
+        self._reset_metrics()
+
+    def _prepare_anchors(self, few_shot_n: int) -> Dict[str, List[Image.Image]]:
+        class_anchors: Dict[str, List[Image.Image]] = {c: [] for c in self.classes}  # Fill this dictionary with the anchor images for each class
+
+        for class_name in self.classes:
+            # Get the indices of the images of the class
+            class_indices = [idx for idx, label in enumerate(self.train_dataset.labels) if label == class_name]
+
+            selected_indices = random.sample(class_indices, few_shot_n)
+            for idx in selected_indices:
+                image = self.train_dataset[idx][0] 
+                class_anchors[class_name].append(image)
+
+        return class_anchors
+
+    def classify_fewshotshot(self, split: str = 'train') -> None:
+        dataloader = self.train_loader if split == 'train' else self.test_loader
+        anchor_embeddings = []  # At the end, should have the shape (self.classes, embed_dim)
+
+        for class_name, anchor_images in self.class_anchors.items():
+            with torch.no_grad():
+                inputs = self.processor(images=anchor_images, return_tensors="pt")
+                inputs.to(self.model.device)
+                embeds = self.model.get_image_features(**inputs)
+                embeds = embeds.mean(dim=0)
+                embeds = embeds / embeds.norm(p=2, dim=-1, keepdim=True)
+                anchor_embeddings.append(embeds)
+
+        anchor_embeddings = torch.stack(anchor_embeddings)
+
+        batch_counter = 0
+
+        for batch in dataloader:
+            batch_counter += 1
+            images, labels = batch
+
+            inputs = self.processor(images=images, return_tensors="pt")
+            inputs.to(self.model.device)
+            embeds = self.model.get_image_features(**inputs)
+            embeds = embeds / embeds.norm(p=2, dim=-1, keepdim=True)
+
+            # cosine similarity calculation
+            similarities = torch.matmul(embeds, anchor_embeddings.transpose(0, 1))
+            norm_image_embeds = torch.norm(embeds, p=2, dim=-1, keepdim=True)
+            norm_anchor_embeddings = torch.norm(anchor_embeddings, p=2, dim=-1, keepdim=True)
+            cos_sim = torch.div(similarities, torch.matmul(norm_image_embeds, norm_anchor_embeddings.transpose(0, 1)))
+            preds = torch.argmax(cos_sim, dim=-1)
+            probs = torch.softmax(cos_sim, dim=-1)
+            print("probs: ", probs)
+            
+            self.metrics[split]['preds'].extend(preds.tolist())
+            self.metrics[split]['gts'].extend(labels)
+            print(self.metrics)
+
+            if batch_counter % 1 == 0:
+                print(classification_report(self.metrics[split]['gts'], self.metrics[split]['preds'], target_names=self.classes))
+
+        self._reset_metrics()
+
+    def classify_withadapter(self, split: str = 'val') -> None:
+        if split == 'val':
+            dataloader = self.val_loader
+        elif split == 'test':
+            dataloader = self.test_loader
+        else:
+            dataloader = self.train_loader
+
+        self.adapter.eval()
+        self.adapter.load_state_dict(torch.load(self.load_path))
+
+        batch_counter = 0
+
+        for batch in dataloader:
+            batch_counter += 1
+
+            images, labels = batch
+
+            inputs = self.processor(images=images, return_tensors="pt")
+            inputs.to(self.model.device)
+            embeds = self.model.get_image_features(**inputs)
+            embeds = embeds / embeds.norm(p=2, dim=-1, keepdim=True)
+            image_features = self.adapter(embeds) #([266, 512])
+
+            text_inputs = self.processor(text=self.questions, return_tensors="pt", padding=True).to(device)
+            text_features = self.model.get_text_features(**text_inputs) #([14, 512])
+
+            text_features = text_features / text_features.norm(dim=-1, keepdim=True)
+            image_features = image_features / image_features.norm(dim=-1, keepdim=True)
+
+            # cosine similarity calculation
+            similarities = torch.matmul(image_features, text_features.transpose(0, 1)) #[266,14]
+            norm_text_features = torch.norm(text_features, p=2, dim=-1, keepdim=True)
+            norm_image_features = torch.norm(image_features, p=2, dim=-1, keepdim=True)
+            cos_sim = torch.div(similarities, torch.matmul(norm_image_features, norm_text_features.transpose(0, 1))) #[266,14]
+
+            predicted_classes = torch.argmax(cos_sim, dim=-1)
+
+            self.metrics[split]['preds'].extend(predicted_classes.tolist())
+            self.metrics[split]['gts'].extend(labels.cpu().tolist())
+            print(self.metrics)
+
+            #if batch_counter % 1 == 0:
+            #    print(classification_report(self.metrics[split]['gts'], self.metrics[split]['preds'], target_names=self.classes))
+
+        self._reset_metrics()
+
+    def train_adapter(self, epochs: int = 10) -> None:
+        self.model.eval()  # Freeze the CLIP model
+        self.adapter.train()
+
+        best_val_loss = float('inf')  
+
+        for epoch in range(epochs):
+            # Training loop
+            for batch in tqdm(self.train_loader, desc=f"Epoch {epoch+1}/{epochs}"):
+                images, labels = batch
+
+                inputs = self.processor(images=images, return_tensors="pt").to(self.device)
+                embeds = self.model.get_image_features(**inputs)
+                embeds = embeds / embeds.norm(p=2, dim=-1, keepdim=True)
+                image_features = self.adapter(embeds)
+
+                text_inputs = self.processor(text=self.questions, return_tensors="pt", padding=True).to(self.device)
+                with torch.no_grad():
+                    text_features = self.model.get_text_features(**text_inputs)
+                text_features = text_features / text_features.norm(dim=-1, keepdim=True)
+
+                cos_sim = torch.matmul(image_features, text_features.transpose(0, 1))
+                predicted_classes = torch.argmax(cos_sim, dim=-1)
+                # print(cos_sim)     
+                # print("labels: ", labels) 
+                # print("predicted_classes:", predicted_classes)
+
+                loss = self.criterion(cos_sim, labels.to(self.device))
+
+                train_loss = loss.item()
+                self.optimizer.zero_grad()
+                loss.backward()
+
+                # for name, param in self.adapter.named_parameters():
+                #     print(name, param.grad)
+
+                self.optimizer.step()
+                self.scheduler.step()
+
+                self.metrics['train']['preds'].extend(predicted_classes.cpu().tolist())
+                self.metrics['train']['gts'].extend(labels.cpu().tolist())
+
+            # Validation loop
+            self.adapter.eval()  
+            with torch.no_grad():
+                val_losses = []
+                for batch in tqdm(self.val_loader, desc=f"Validation {epoch+1}/{epochs}"):
+                    images, labels = batch
+                    images, labels = images.to(self.device), labels.to(self.device)
+
+                    inputs = self.processor(images=images, return_tensors="pt").to(self.device)
+                    embeds = self.model.get_image_features(**inputs)
+                    embeds = embeds / embeds.norm(p=2, dim=-1, keepdim=True)
+                    image_features = self.adapter(embeds)
+
+                    text_inputs = self.processor(text=self.questions, return_tensors="pt", padding=True).to(self.device)
+                    with torch.no_grad():
+                        text_features = self.model.get_text_features(**text_inputs)
+                    text_features = text_features / text_features.norm(dim=-1, keepdim=True)
+
+                    cos_sim = torch.matmul(image_features, text_features.transpose(0, 1))
+                    # print("cos_sim: ", cos_sim)
+
+                    predicted_classes = torch.argmax(cos_sim, dim=-1)
+                    self.metrics['val']['preds'].extend(predicted_classes.cpu().tolist())
+                    self.metrics['val']['gts'].extend(labels.cpu().tolist())
+
+                    val_loss = self.criterion(cos_sim, labels.to(self.device))
+                    val_losses.append(val_loss.item())
+
+            # Calculate and log classification metrics
+            train_report = classification_report(self.metrics['train']['gts'], self.metrics['train']['preds'], target_names=self.classes, output_dict=True)
+            test_report = classification_report(self.metrics['val']['gts'], self.metrics['val']['preds'], target_names=self.classes, output_dict=True)
+            for metric, value in train_report.items():
+                if (metric == 'accuracy'):
+                    train_acc = value
+            for metric, value in test_report.items():
+                if (metric == 'accuracy'):
+                    val_acc = value
+            
+            self.writer.add_scalars('Acc', {'Train': train_acc, 'Validation': val_acc}, epoch)
+
+            mean_val_loss = sum(val_losses) / len(val_losses)
+
+            if mean_val_loss < best_val_loss:
+                best_val_loss = mean_val_loss
+                torch.save(self.adapter.state_dict(), self.save_path)
+                print(f"Model saved at epoch {epoch+1}, with validation loss: {mean_val_loss}, path: {self.save_path}, train_acc: {train_acc}, val_acc: {val_acc}")
+
+            self.writer.add_scalars('Losses', {'Train': train_loss, 'Val': mean_val_loss}, epoch)
+
+            #print(classification_report(self.metrics['train']['gts'], self.metrics['train']['preds'], target_names=self.classes))
+            #print(classification_report(self.metrics['test']['gts'], self.metrics['test']['preds'], target_names=self.classes))
+            self.metrics = self._reset_metrics()
+
+if __name__ == '__main__':
+    model_name = 'openai/clip-vit-base-patch16'  # 'openai/clip-vit-base-patch32' or 'openai/clip-vit-base-patch16'
+    print(f' Model: {model_name}')
+    device = torch.device("cuda") if torch.cuda.is_available() else torch.device("cpu")
+
+    #with torch.no_grad():
+    # subsets = [d for d in os.listdir('data/remote14') if os.path.isdir(os.path.join('data/remote14', d))]
+
+    clip_classifier = CLIPClassifier(device, model_name=model_name, bs=16)
+
+    #clip_classifier.classify_zeroshot(split='train' )
+    #clip_classifier.classify_fewshotshot(split='train')
+
+    #clip_classifier.train_adapter(epochs=50)
+
+    clip_classifier.classify_withadapter(split='val')

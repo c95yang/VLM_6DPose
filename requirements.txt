@@ -1,0 +1,9 @@
+torch==1.13.1
+torchvision==0.14.1
+transformers==4.27.4
+scikit-learn==1.1.1
+tqdm==4.64.0
+protobuf==3.20.0
+torch-scatter==2.1.1
+ftfy==6.1.1
+h5py==3.8.0
