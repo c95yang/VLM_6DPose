@@ -20,7 +20,7 @@ from warmup_scheduler import GradualWarmupScheduler
 class CLIPClassifier:
     def __init__(self, device: torch.device, bs: int, model_name: str) -> None:
         self.save_path = 'ckpts/adapter.pth'
-        self.load_path = 'ckpts/adapter.pth'
+        self.load_path = 'ckpts/adapter_16_1e-2.pth'
         self.device = device
         self.model_name = model_name
         self.model = CLIPModel.from_pretrained(self.model_name).to(device)
@@ -193,7 +193,6 @@ class CLIPClassifier:
             text_features = text_features / text_features.norm(dim=-1, keepdim=True)
             image_features = image_features / image_features.norm(dim=-1, keepdim=True)
 
-            # cosine similarity calculation
             similarities = torch.matmul(image_features, text_features.transpose(0, 1)) #[266,14]
             norm_text_features = torch.norm(text_features, p=2, dim=-1, keepdim=True)
             norm_image_features = torch.norm(image_features, p=2, dim=-1, keepdim=True)
@@ -208,22 +207,34 @@ class CLIPClassifier:
             acc = sum([1 for gt, pred in zip(self.metrics[split]['gts'], self.metrics[split]['preds']) if gt == pred]) / len(self.metrics[split]['gts'])
             print(f"Accuracy: {acc}")
 
-            fig, axes = plt.subplots(nrows=1, ncols=len(images), figsize=(20, 20))
-            for i in range(len(images)):
-                img = images[i].cpu()
-                img = img.numpy().transpose((1, 2, 0))
+            print(self.metrics)
+            
+            num_images = len(images) 
+            num_rows = 2
+            num_cols = 8
 
-                pred_label = self.classes[predicted_classes.tolist()[i]]
-                gt_label = self.classes[labels.cpu().tolist()[i]]
+            fig, axes = plt.subplots(nrows=num_rows, ncols=num_cols, figsize=(20, 20))  # Create subplots with appropriate number of rows and columns
+            for ax_row in axes:
+                for ax in ax_row:
+                    ax.axis('off')
 
-                ax = axes[i]
+            for i in range(num_images):
+                img = images[i].cpu().numpy().transpose((1, 2, 0))
+
+                pred_label = self.classes[predicted_classes[i]]
+                gt_label = self.classes[labels[i].cpu().item()]  # Assuming labels are scalar
+
+                row = i // num_cols  # Determine row index
+                col = i % num_cols   # Determine column index
+
+                # print(f"Row: {row}, Col: {col}")
+                ax = axes[row, col]  # Accessing the axes correctly
                 ax.imshow(img)
-
                 ax.set_title(pred_label, fontsize=12, color="green" if pred_label == gt_label else "red", pad=10)
                 ax.text(0.5, -0.1, gt_label, transform=ax.transAxes, ha='center', va='top', fontsize=12, color="black")
-                ax.axis('off')
 
             plt.show()
+
 
         self._reset_metrics()
 
@@ -319,10 +330,10 @@ if __name__ == '__main__':
     print(f' Model: {model_name}')
     device = torch.device("cuda") if torch.cuda.is_available() else torch.device("cpu")
 
-    clip_classifier = CLIPClassifier(device, model_name=model_name, bs=8)
+    clip_classifier = CLIPClassifier(device, model_name=model_name, bs=16)
 
-    #clip_classifier.classify_zeroshot(split='train' )
-    #clip_classifier.classify_fewshotshot(split='train')
+    # clip_classifier.classify_zeroshot(split='train' )
+    # clip_classifier.classify_fewshotshot(split='train')
 
     # clip_classifier.train_adapter(epochs=50)
     clip_classifier.classify_withadapter(split='val')
