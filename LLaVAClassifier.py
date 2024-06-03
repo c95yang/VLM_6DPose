@@ -1,6 +1,8 @@
 from typing import List, Dict
-import textwrap
+import requests
+from io import BytesIO
 import os
+import textwrap
 import matplotlib.pyplot as plt
 from PIL import Image
 from transformers.generation.streamers import TextIteratorStreamer
@@ -62,22 +64,22 @@ class LLaVAClassifier:
         self.writer = SummaryWriter()
 
         self.image_dir = 'data/remote14'
-        self.train_dataset = Remote14(root_dir=self.image_dir, is_train=True)
-        self.val_dataset = Remote14(root_dir=self.image_dir, is_val=True)
+        # self.train_dataset = Remote14(root_dir=self.image_dir, is_train=True)
+        # self.val_dataset = Remote14(root_dir=self.image_dir, is_val=True)
         self.test_dataset = Remote14(root_dir=self.image_dir, is_test=True)
 
-        self.train_loader = DataLoader(
-                                self.train_dataset,
-                                batch_size=bs,
-                                shuffle=True,
-                                pin_memory=True
-                            )
-        self.val_loader = DataLoader(
-                                self.val_dataset,
-                                batch_size=bs,
-                                shuffle=False,
-                                pin_memory=True
-                            )
+        # self.train_loader = DataLoader(
+        #                         self.train_dataset,
+        #                         batch_size=bs,
+        #                         shuffle=True,
+        #                         pin_memory=True
+        #                     )
+        # self.val_loader = DataLoader(
+        #                         self.val_dataset,
+        #                         batch_size=bs,
+        #                         shuffle=False,
+        #                         pin_memory=True
+        #                     )
         self.test_loader = DataLoader(
                                 self.test_dataset,
                                 batch_size=bs,
@@ -85,7 +87,7 @@ class LLaVAClassifier:
                                 pin_memory=True
                             )
 
-        self.classes = self.train_dataset.classes
+        self.classes = self.test_dataset.classes
         self.metrics = self._reset_metrics()
 
         self.adapter = Adapter().to(self.device)
@@ -99,6 +101,63 @@ class LLaVAClassifier:
     def _reset_metrics(self) -> Dict[str, Dict[str, List[int]]]:
         self.metrics = {'train': {'gts': [], 'preds': []}, 'val': {'gts': [], 'preds': []}, 'test': {'gts': [], 'preds': []}}
         return self.metrics 
+    
+    def load_image(self, path: str) -> Image:
+        if path.startswith('http') or path.startswith('https'):
+            response = requests.get(path)
+            return Image.open(BytesIO(response.content)).convert('RGB')
+        return Image.open(path).convert('RGB')
+    
+    def generate_text(self, input_ids: torch.Tensor, images_tensor: torch.Tensor, streamer: TextIteratorStreamer) -> str:
+        with torch.inference_mode() and torch.cuda.amp.autocast():
+            self.model.generate(
+                inputs=input_ids,
+                images=images_tensor,
+                do_sample=True,
+                temperature=0.05,
+                top_p=1.0,
+                max_new_tokens=100,
+                streamer=streamer,
+                #use_cache=True
+            )
+    
+    def ask_question(self, image: Image, question: str) -> str:
+        conv = conv_templates[self.conv_mode].copy()
+        inp = DEFAULT_IMAGE_TOKEN + '\n' + question
+        conv.append_message(conv.roles[0], inp)
+        conv.append_message(conv.roles[1], None)
+        image_tensor = self.image_processor.preprocess(image, return_tensors='pt', do_rescale=False)['pixel_values'].to(self.model.device)
+        input_ids = tokenizer_image_token(inp, self.tokenizer, IMAGE_TOKEN_INDEX, return_tensors='pt').unsqueeze(0).cuda()
+        stop_str = conv.sep if conv.sep_style != SeparatorStyle.TWO else conv.sep2
+        streamer = TextIteratorStreamer(self.tokenizer, skip_prompt=True, timeout=20.0)
+        thread = Thread(target=self.generate_text, args=(input_ids, image_tensor, streamer))
+        thread.start()
+        prepend_space = False
+        generated_text = ""
+        
+        for new_text in streamer:
+            if new_text == " ":
+                prepend_space = True
+                continue
+            if new_text.endswith(stop_str):
+                new_text = new_text[:-len(stop_str)].strip()
+                prepend_space = False
+            elif prepend_space:
+                new_text = " " + new_text
+                prepend_space = False
+            if len(new_text):
+                generated_text += new_text
+        if prepend_space:
+            generated_text += " "
+        thread.join()
+
+        generated_text = generated_text.replace("</s>", "").strip()
+        print(generated_text)
+        plt.imshow(image)
+        wrapped_title = "\n".join(textwrap.wrap(generated_text, width=100))
+        plt.title(wrapped_title)
+        plt.show()
+        return generated_text
 
     def train_adapter(self, epochs: int = 10) -> None:
         self.model.eval()  # Freeze the CLIP model
@@ -108,14 +167,11 @@ class LLaVAClassifier:
 
         for epoch in range(epochs):
             # Training loop
-            for batch in tqdm(self.train_loader, desc=f"Epoch {epoch+1}/{epochs}"):
+            for batch in tqdm(self.test_loader, desc=f"Epoch {epoch+1}/{epochs}"):
                 images, labels = batch
-
                 
                 conv = conv_templates[self.conv_mode].copy()
                 images_tensor = self.image_processor.preprocess(images, return_tensors='pt', do_rescale=False)['pixel_values'].to(self.model.device)
-                
-                # image_features = self.adapter(embeds)
 
                 # prompt = "Which direction is the object in the photo observed from? Only following options: back, \
                 #     bottom, bottomleftback, bottomleftfront, bottomrightback, bottomrightfront,\
@@ -144,6 +200,7 @@ class LLaVAClassifier:
                 #     front, left, right, top, topleftback, topleftfront, toprightback, toprightfront."
                 
                 prompt = "Describe what you see in the photo. Tell me in a short phrase the camera position. \n"
+                # prompt = "Describe what you see in the photo. \n"
 
 
                 inp = DEFAULT_IMAGE_TOKEN + '\n' + prompt
@@ -155,21 +212,8 @@ class LLaVAClassifier:
                 stop_str = conv.sep if conv.sep_style != SeparatorStyle.TWO else conv.sep2
                 #keywords = [stop_str]
                 streamer = TextIteratorStreamer(self.tokenizer, skip_prompt=True, timeout=20.0)
-    
-                def generate_text():
-                    with torch.inference_mode() and torch.cuda.amp.autocast():
-                        self.model.generate(
-                            inputs=input_ids,
-                            images=images_tensor,
-                            do_sample=True,
-                            temperature=0.1,
-                            top_p=1.0,
-                            max_new_tokens=10,
-                            streamer=streamer,
-                            #use_cache=True
-                        )
                 
-                thread = Thread(target=generate_text)
+                thread = Thread(target=self.generate_text, args=(input_ids, images_tensor, streamer))
                 thread.start()
                 prepend_space = False
                 generated_text = ""
@@ -191,11 +235,16 @@ class LLaVAClassifier:
                 thread.join()
 
                 generated_text = generated_text.replace("</s>", "").strip()
+                print(generated_text)
                 img = images[0].cpu().numpy().transpose((1, 2, 0))
                 gt_label = self.classes[labels[0].cpu().item()]  
                 plt.imshow(img)
                 plt.title(f"GT: {gt_label}, Pred: {generated_text}")
+                #plt.title(generated_text)
                 plt.show()
+            
+
+
 
             #     text_inputs = self.processor(text=generated_text, return_tensors="pt", padding=True).to(self.device)
             #     with torch.no_grad():
@@ -313,5 +362,6 @@ class LLaVAClassifier:
 
 if __name__ == '__main__':
     llava_classifier = LLaVAClassifier(bs=1)
-    llava_classifier.train_adapter(epochs=50)
-    #llava_classifier.classify_withadapter(split='val')
+    #llava_classifier.train_adapter(epochs=50)
+    llava_classifier.ask_question(llava_classifier.load_image('/home/cc/Downloads/3751235deeae4e8a88709fd74fb700eb.jpeg'), "Describe what you see in the photo. \n")
+    llava_classifier.ask_question(llava_classifier.load_image('/home/cc/Downloads/3751235deeae4e8a88709fd74fb700eb.jpeg'), "What do you see in this photo? Is it a cat? \n")
