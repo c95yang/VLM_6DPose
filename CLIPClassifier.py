@@ -20,7 +20,7 @@ from warmup_scheduler import GradualWarmupScheduler
 class CLIPClassifier:
     def __init__(self, device: torch.device, bs: int, model_name: str) -> None:
         self.save_path = 'ckpts/adapter.pth'
-        self.load_path = 'ckpts/adapter_16_1e-2.pth'
+        self.load_path = 'ckpts/adapter.pth'
         self.device = device
         self.model_name = model_name
         self.model = CLIPModel.from_pretrained(self.model_name).to(device)
@@ -56,7 +56,7 @@ class CLIPClassifier:
         self.class_anchors = self._prepare_anchors(2)
         self.metrics = self._reset_metrics()
 
-        self.adapter = Adapter().to(device)
+        self.adapter = Adapter(in_features=768, hidden_features=768).to(device)
         self.optimizer = optim.Adam(self.adapter.parameters(), lr=1e-2, weight_decay=1e-4)
         self.criterion = nn.CrossEntropyLoss()
 
@@ -83,7 +83,7 @@ class CLIPClassifier:
             images, label = batch
 
             texts = self._prepare_multiple_prompt()
-            print("texts", texts)
+            # print("texts", texts)
 
             inputs = self.processor(texts, images, return_tensors="pt", padding=True)
             inputs.to(self.model.device)
@@ -100,9 +100,7 @@ class CLIPClassifier:
             self.metrics[split]['preds'].extend(preds.cpu().tolist())
             print(self.metrics)
 
-            if batch_counter % 1 == 0:
-                print(classification_report(self.metrics[split]['gts'], self.metrics[split]['preds'], target_names=self.classes))
-
+        print(classification_report(self.metrics[split]['gts'], self.metrics[split]['preds'], target_names=self.classes))
         self._reset_metrics()
 
     def _prepare_anchors(self, few_shot_n: int) -> Dict[str, List[Image.Image]]:
@@ -152,15 +150,13 @@ class CLIPClassifier:
             cos_sim = torch.div(similarities, torch.matmul(norm_image_embeds, norm_anchor_embeddings.transpose(0, 1)))
             preds = torch.argmax(cos_sim, dim=-1)
             probs = torch.softmax(cos_sim, dim=-1)
-            print("probs: ", probs)
+            #print("probs: ", probs)
             
             self.metrics[split]['preds'].extend(preds.tolist())
-            self.metrics[split]['gts'].extend(labels)
+            self.metrics[split]['gts'].extend(labels.cpu().tolist())
             print(self.metrics)
-
-            if batch_counter % 1 == 0:
-                print(classification_report(self.metrics[split]['gts'], self.metrics[split]['preds'], target_names=self.classes))
-
+             
+        print(classification_report(self.metrics[split]['gts'], self.metrics[split]['preds'], target_names=self.classes))
         self._reset_metrics()
 
     def classify_withadapter(self, split: str = 'val') -> None:
@@ -252,13 +248,14 @@ class CLIPClassifier:
                 inputs = self.processor(images=images, return_tensors="pt", do_rescale=False).to(self.device)
                 embeds = self.model.get_image_features(**inputs)
                 embeds = embeds / embeds.norm(p=2, dim=-1, keepdim=True)
+
                 image_features = self.adapter(embeds)
 
                 text_inputs = self.processor(text=self.questions, return_tensors="pt", padding=True).to(self.device)
                 with torch.no_grad():
                     text_features = self.model.get_text_features(**text_inputs)
                 text_features = text_features / text_features.norm(dim=-1, keepdim=True)
-
+                
                 cos_sim = torch.matmul(image_features, text_features.transpose(0, 1))
                 predicted_classes = torch.argmax(cos_sim, dim=-1)
                 # print(cos_sim)     
@@ -326,14 +323,15 @@ class CLIPClassifier:
             self.metrics = self._reset_metrics()
 
 if __name__ == '__main__':
-    model_name = 'openai/clip-vit-base-patch16'  
+    # model_name = 'openai/clip-vit-base-patch16' 
+    model_name = 'openai/clip-vit-large-patch14-336' 
     print(f' Model: {model_name}')
     device = torch.device("cuda") if torch.cuda.is_available() else torch.device("cpu")
 
-    clip_classifier = CLIPClassifier(device, model_name=model_name, bs=16)
+    clip_classifier = CLIPClassifier(device, model_name=model_name, bs=2)
 
     # clip_classifier.classify_zeroshot(split='train' )
     # clip_classifier.classify_fewshotshot(split='train')
 
-    # clip_classifier.train_adapter(epochs=50)
-    clip_classifier.classify_withadapter(split='val')
+    clip_classifier.train_adapter(epochs=50)
+    # clip_classifier.classify_withadapter(split='val')

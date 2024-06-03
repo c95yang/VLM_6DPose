@@ -3,11 +3,13 @@ import torch
 import torch.nn as nn
 
 class Adapter(nn.Module):
-    def __init__(self):
+    def __init__(self, in_features=512, hidden_features=512, adapter_ratio=1, dropout=0.075):
         super().__init__()
 
-        # self.adapter_ratio = 1
-        self.dropout = 0.075
+        self.in_features = in_features
+        self.hidden_features = hidden_features
+        # self.adapter_ratio = adapter_ratio
+        self.dropout = dropout
 
         self.layers = nn.Sequential(
 
@@ -16,11 +18,11 @@ class Adapter(nn.Module):
             # nn.Linear(in_features=self.in_features, out_features=self.hidden_features),
             # nn.GELU(),
 
-            nn.BatchNorm1d(512),
+            nn.BatchNorm1d(self.in_features),
             nn.Dropout(self.dropout),
-            nn.Linear(in_features=512, out_features=512),
+            nn.Linear(in_features=self.in_features, out_features=self.hidden_features),
             nn.GELU(),
-            nn.BatchNorm1d(512),
+            nn.BatchNorm1d(self.hidden_features),
             nn.Dropout(self.dropout)
             )
         

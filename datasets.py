@@ -20,6 +20,7 @@ class Remote14(Dataset):
         self.load_images_and_labels()
         self.class_to_idx = {cls: idx for idx, cls in enumerate(self.classes)}
         # print(self.class_to_idx)
+        self.desired_size = (800, 800)
     
     def load_images_and_labels(self): 
         if self.is_val:
@@ -37,6 +38,12 @@ class Remote14(Dataset):
                 if file.endswith('.png'):
                     img_path = os.path.join(subdir, file)
                     label = os.path.splitext(file)[0].lower()
+
+                    img = Image.open(img_path)
+                    if  path == os.path.join(self.root_dir, 'test') and img.size != (800, 800):
+                        img = img.resize((800, 800), Image.ANTIALIAS)
+                        img.save(img_path)
+                    img.close()
 
                     self.image_paths.append(img_path)
                     self.labels.append(label)
