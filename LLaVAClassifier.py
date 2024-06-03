@@ -1,6 +1,7 @@
 from typing import List, Dict
 import textwrap
 import os
+import matplotlib.pyplot as plt
 from PIL import Image
 from transformers.generation.streamers import TextIteratorStreamer
 import torch
@@ -56,6 +57,8 @@ class LLaVAClassifier:
             load_8bit=False, 
             load_4bit=True)
         
+        self.conv_mode = "llava_v0"
+        
         self.writer = SummaryWriter()
 
         self.image_dir = 'data/remote14'
@@ -83,10 +86,9 @@ class LLaVAClassifier:
                             )
 
         self.classes = self.train_dataset.classes
-        self.questions = self._prepare_multiple_prompt()
         self.metrics = self._reset_metrics()
 
-        self.adapter = Adapter(in_features=338688).to(self.device)
+        self.adapter = Adapter().to(self.device)
         self.optimizer = optim.Adam(self.adapter.parameters(), lr=1e-1, weight_decay=1e-4)
         self.criterion = nn.CrossEntropyLoss()
 
@@ -96,12 +98,7 @@ class LLaVAClassifier:
 
     def _reset_metrics(self) -> Dict[str, Dict[str, List[int]]]:
         self.metrics = {'train': {'gts': [], 'preds': []}, 'val': {'gts': [], 'preds': []}, 'test': {'gts': [], 'preds': []}}
-        return self.metrics
-    
-    def _prepare_multiple_prompt(self) -> List[str]:
-        questions = [f"A remote control device observed from {CLASS_NAME} direction." for CLASS_NAME in self.classes]
-        return questions
-    
+        return self.metrics 
 
     def train_adapter(self, epochs: int = 10) -> None:
         self.model.eval()  # Freeze the CLIP model
@@ -114,29 +111,49 @@ class LLaVAClassifier:
             for batch in tqdm(self.train_loader, desc=f"Epoch {epoch+1}/{epochs}"):
                 images, labels = batch
 
-                conv_mode = "llava_v0"
-                conv = conv_templates[conv_mode].copy()
-                images_tensor = self.image_processor(images, return_tensors='pt')['pixel_values'].to(self.model.device)
-                print(images_tensor.shape)
                 
-                #embeds = images_tensor.flatten(2, 3).flatten(1, 2)
-                #image_features = self.adapter(embeds)
+                conv = conv_templates[self.conv_mode].copy()
+                images_tensor = self.image_processor.preprocess(images, return_tensors='pt', do_rescale=False)['pixel_values'].to(self.model.device)
+                
+                # image_features = self.adapter(embeds)
 
-                # prompt = "Which direction is the object in the photo observed from? Choose only one direction from the following options: back? \
-                #     bottom? bottomleftback? bottomleftfront?bottomrightback? bottomrightfront?\
-                #           front? left?right? top? topleftback? topleftfront? toprightback? toprightfront?"
+                # prompt = "Which direction is the object in the photo observed from? Only following options: back, \
+                #     bottom, bottomleftback, bottomleftfront, bottomrightback, bottomrightfront,\
+                #           front, left, right, top, topleftback, topleftfront, toprightback, toprightfront."
+
+                # prompt = "Tell me from which direction is the photo taken. 1: back, 2: bottom, 3: bottom left back, 4: bottom leftf ront, \
+                #     5: bottom right back, 6: bottom right front,7: front, 8: left, 9: right, 10: top, 11: top left back, 12: top left front, \
+                #     13: top right back, 14: top right front"
                 
-                prompt = "Which direction is the object in the photo observed from? "
+                # prompt = "Tell me from which direction is the photo taken. back, bottom, bottom left back, bottom left front, \
+                #     bottom right back, bottom right front, front, left, right, top, top left back, top left front, \
+                #     top right back, top right front"
+                
+                # prompt = "Tell me from which direction is the photo taken: back, bottom, bottom left back, bottom left front, \
+                #      bottom right back, bottom right front, front, left, right, top, top left back, top left front, \
+                #      top right back, top right front?"
+                
+                #prompt = "Which direction is the photo taken from: back, bottom, front, left, right, top?"
+                
+                #prompt = "Which direction is the object in the photo observed from?\n"
+
+                #prompt = "Tell me from which direction is the photo taken. Answer shortly in a word. \n"
+
+                # prompt = "A remote is shown in the photo. In one or two words, tell me from which direction is the camera from. Only following options: back, \
+                #     bottom, bottomleftback, bottomleftfront, bottomrightback, bottomrightfront,\
+                #     front, left, right, top, topleftback, topleftfront, toprightback, toprightfront."
+                
+                prompt = "Describe what you see in the photo. Tell me in a short phrase the camera position. \n"
+
 
                 inp = DEFAULT_IMAGE_TOKEN + '\n' + prompt
                 conv.append_message(conv.roles[0], inp)
-
                 conv.append_message(conv.roles[1], None)
-                #prompt = conv.get_prompt()
+                # prompt = conv.get_prompt()
             
-                input_ids = tokenizer_image_token(prompt, self.tokenizer, IMAGE_TOKEN_INDEX, return_tensors='pt').unsqueeze(0).cuda()
+                input_ids = tokenizer_image_token(inp, self.tokenizer, IMAGE_TOKEN_INDEX, return_tensors='pt').unsqueeze(0).cuda()
                 stop_str = conv.sep if conv.sep_style != SeparatorStyle.TWO else conv.sep2
-                keywords = [stop_str]
+                #keywords = [stop_str]
                 streamer = TextIteratorStreamer(self.tokenizer, skip_prompt=True, timeout=20.0)
     
                 def generate_text():
@@ -147,9 +164,9 @@ class LLaVAClassifier:
                             do_sample=True,
                             temperature=0.1,
                             top_p=1.0,
-                            max_new_tokens=100,
+                            max_new_tokens=10,
                             streamer=streamer,
-                            use_cache=True
+                            #use_cache=True
                         )
                 
                 thread = Thread(target=generate_text)
@@ -173,83 +190,128 @@ class LLaVAClassifier:
                     generated_text += " "
                 thread.join()
 
-                print(generated_text)
+                generated_text = generated_text.replace("</s>", "").strip()
+                img = images[0].cpu().numpy().transpose((1, 2, 0))
+                gt_label = self.classes[labels[0].cpu().item()]  
+                plt.imshow(img)
+                plt.title(f"GT: {gt_label}, Pred: {generated_text}")
+                plt.show()
 
-                text_inputs = self.processor(text=generated_text, return_tensors="pt", padding=True).to(self.device)
-                with torch.no_grad():
-                    text_features = self.model.get_text_features(**text_inputs)
-                text_features = text_features / text_features.norm(dim=-1, keepdim=True)
+            #     text_inputs = self.processor(text=generated_text, return_tensors="pt", padding=True).to(self.device)
+            #     with torch.no_grad():
+            #         text_features = self.model.get_text_features(**text_inputs)
+            #     text_features = text_features / text_features.norm(dim=-1, keepdim=True)
 
-                cos_sim = torch.matmul(image_features, text_features.transpose(0, 1))
-                predicted_classes = torch.argmax(cos_sim, dim=-1)
+            #     cos_sim = torch.matmul(image_features, text_features.transpose(0, 1))
+            #     predicted_classes = torch.argmax(cos_sim, dim=-1)
 
-                loss = self.criterion(cos_sim, labels.to(self.device))
+            #     loss = self.criterion(cos_sim, labels.to(self.device))
 
-                train_loss = loss.item()
-                self.optimizer.zero_grad()
-                loss.backward()
+            #     train_loss = loss.item()
+            #     self.optimizer.zero_grad()
+            #     loss.backward()
 
-                self.optimizer.step()
-                self.scheduler.step()
+            #     self.optimizer.step()
+            #     self.scheduler.step()
 
-                self.metrics['train']['preds'].extend(predicted_classes.cpu().tolist())
-                self.metrics['train']['gts'].extend(labels.cpu().tolist())
+            #     self.metrics['train']['preds'].extend(predicted_classes.cpu().tolist())
+            #     self.metrics['train']['gts'].extend(labels.cpu().tolist())
 
-            # Validation loop
-            self.adapter.eval()  
-            with torch.no_grad():
-                val_losses = []
-                for batch in tqdm(self.val_loader, desc=f"Validation {epoch+1}/{epochs}"):
-                    images, labels = batch
-                    images, labels = images.to(self.device), labels.to(self.device)
+            # # Validation loop
+            # self.adapter.eval()  
+            # with torch.no_grad():
+            #     val_losses = []
+            #     for batch in tqdm(self.val_loader, desc=f"Validation {epoch+1}/{epochs}"):
+            #         images, labels = batch
+            #         images, labels = images.to(self.device), labels.to(self.device)
                     
-                    images_tensor = process_images(
-                        images,
-                        self.image_processor,
-                        self.model.config
-                    ).to(self.model.device)
+            #         conv = conv_templates[self.conv_mode].copy()
+            #         images_tensor = self.image_processor.preprocess(images, return_tensors='pt', do_rescale=False)['pixel_values'].to(self.model.device)
                     
-                    embeds = images_tensor.flatten(2, 3).flatten(1, 2)
-                    embeds = embeds / embeds.norm(p=2, dim=-1, keepdim=True)
-                    adapter = Adapter(in_features=embeds.shape[-1]).to(self.device)
-                    image_features = adapter(embeds)
+            #         # image_features = self.adapter(embeds)
 
-                    text_inputs = self.processor(text=self.questions, return_tensors="pt", padding=True).to(self.device)
-                    with torch.no_grad():
-                        text_features = self.model.get_text_features(**text_inputs)
-                    text_features = text_features / text_features.norm(dim=-1, keepdim=True)
+            #         # prompt = "Which direction is the object in the photo observed from? Only following options: back, \
+            #         #     bottom, bottomleftback, bottomleftfront, bottomrightback, bottomrightfront,\
+            #         #           front, left, right, top, topleftback, topleftfront, toprightback, toprightfront."
+                    
+            #         prompt = "Which direction is the object in the photo observed from?\n"
+            #         # prompt = "Describe the picture."
 
-                    cos_sim = torch.matmul(image_features, text_features.transpose(0, 1))
+            #         inp = DEFAULT_IMAGE_TOKEN + '\n' + prompt
+            #         conv.append_message(conv.roles[0], inp)
+            #         conv.append_message(conv.roles[1], None)
+            #         #prompt = conv.get_prompt()
+                
+            #         input_ids = tokenizer_image_token(inp, self.tokenizer, IMAGE_TOKEN_INDEX, return_tensors='pt').unsqueeze(0).cuda()
+            #         stop_str = conv.sep if conv.sep_style != SeparatorStyle.TWO else conv.sep2
+            #         #keywords = [stop_str]
+            #         streamer = TextIteratorStreamer(self.tokenizer, skip_prompt=True, timeout=20.0)
+        
+            #         def generate_text():
+            #             with torch.inference_mode() and torch.cuda.amp.autocast():
+            #                 self.model.generate(
+            #                     inputs=input_ids,
+            #                     images=images_tensor,
+            #                     do_sample=True,
+            #                     temperature=0.1,
+            #                     top_p=1.0,
+            #                     max_new_tokens=100,
+            #                     streamer=streamer,
+            #                     #use_cache=True
+            #                 )
+                    
+            #         thread = Thread(target=generate_text)
+            #         thread.start()
+            #         prepend_space = False
+            #         generated_text = ""
+                    
+            #         for new_text in streamer:
+            #             if new_text == " ":
+            #                 prepend_space = True
+            #                 continue
+            #             if new_text.endswith(stop_str):
+            #                 new_text = new_text[:-len(stop_str)].strip()
+            #                 prepend_space = False
+            #             elif prepend_space:
+            #                 new_text = " " + new_text
+            #                 prepend_space = False
+            #             if len(new_text):
+            #                 generated_text += new_text
+            #         if prepend_space:
+            #             generated_text += " "
+            #         thread.join()
 
-                    predicted_classes = torch.argmax(cos_sim, dim=-1)
-                    self.metrics['val']['preds'].extend(predicted_classes.cpu().tolist())
-                    self.metrics['val']['gts'].extend(labels.cpu().tolist())
+            #         print(generated_text)
 
-                    val_loss = self.criterion(cos_sim, labels.to(self.device))
-                    val_losses.append(val_loss.item())
+            #         text_inputs = self.processor(text=self.questions, return_tensors="pt", padding=True).to(self.device)
+            #         with torch.no_grad():
+            #             text_features = self.model.get_text_features(**text_inputs)
+            #         text_features = text_features / text_features.norm(dim=-1, keepdim=True)
 
-            train_report = classification_report(self.metrics['train']['gts'], self.metrics['train']['preds'], target_names=self.classes, output_dict=True)
-            test_report = classification_report(self.metrics['val']['gts'], self.metrics['val']['preds'], target_names=self.classes, output_dict=True)
-            for metric, value in train_report.items():
-                if (metric == 'accuracy'):
-                    train_acc = value
-            for metric, value in test_report.items():
-                if (metric == 'accuracy'):
-                    val_acc = value
-            
-            self.writer.add_scalars('Acc', {'Train': train_acc, 'Validation': val_acc}, epoch)
+            #         cos_sim = torch.matmul(image_features, text_features.transpose(0, 1))
 
-            mean_val_loss = sum(val_losses) / len(val_losses)
+            #         predicted_classes = torch.argmax(cos_sim, dim=-1)
+            #         self.metrics['val']['preds'].extend(predicted_classes.cpu().tolist())
+            #         self.metrics['val']['gts'].extend(labels.cpu().tolist())
 
-            if mean_val_loss < best_val_loss:
-                best_val_loss = mean_val_loss
-                torch.save(self.adapter.state_dict(), self.save_path)
-                print(f"Model saved at epoch {epoch+1}, with validation loss: {mean_val_loss}, path: {self.save_path}, train_acc: {train_acc}, val_acc: {val_acc}")
+            #         val_loss = self.criterion(cos_sim, labels.to(self.device))
+            #         val_losses.append(val_loss.item())
 
-            self.writer.add_scalars('Losses', {'Train': train_loss, 'Val': mean_val_loss}, epoch)
-            self.metrics = self._reset_metrics()
+            # train_acc = sum([1 for gt, pred in zip(self.metrics['train']['gts'], self.metrics['train']['preds']) if gt == pred]) / len(self.metrics['train']['gts'])
+            # val_acc = sum([1 for gt, pred in zip(self.metrics['val']['gts'], self.metrics['val']['preds']) if gt == pred]) / len(self.metrics['val']['gts'])
+            # self.writer.add_scalars('Acc', {'Train': train_acc, 'Validation': val_acc}, epoch)
+
+            # mean_val_loss = sum(val_losses) / len(val_losses)
+
+            # if mean_val_loss < best_val_loss:
+            #     best_val_loss = mean_val_loss
+            #     torch.save(self.adapter.state_dict(), self.save_path)
+            #     print(f"Model saved at epoch {epoch+1}, with validation loss: {mean_val_loss}, path: {self.save_path}, train_acc: {train_acc}, val_acc: {val_acc}")
+
+            # self.writer.add_scalars('Losses', {'Train': train_loss, 'Val': mean_val_loss}, epoch)
+            # self.metrics = self._reset_metrics()
 
 if __name__ == '__main__':
-    llava_classifier = LLaVAClassifier(bs=16)
+    llava_classifier = LLaVAClassifier(bs=1)
     llava_classifier.train_adapter(epochs=50)
     #llava_classifier.classify_withadapter(split='val')
