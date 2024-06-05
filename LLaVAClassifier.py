@@ -6,11 +6,14 @@ import textwrap
 import matplotlib.pyplot as plt
 from PIL import Image
 from transformers.generation.streamers import TextIteratorStreamer
+from transformers import BitsAndBytesConfig, pipeline
+from torchvision.transforms import ToPILImage
 import torch
 from threading import Thread
 from sklearn.metrics import classification_report
+
 from torch.utils.data import DataLoader
-from datasets import Remote14
+from datasets import Remote14_raw
 from tqdm import tqdm
 #from transformers import CLIPProcessor, CLIPModel
 import random
@@ -52,34 +55,37 @@ class LLaVAClassifier:
         self.load_path = 'adapter.pth'
         self.device = 'cuda' if torch.cuda.is_available() else 'cpu'
 
-        self.tokenizer, self.model, self.image_processor, self.context_len = load_pretrained_model(
-            "liuhaotian/llava-v1.5-7b", 
-            model_name="llava-v1.5-7b", 
-            model_base=None, 
-            load_8bit=False, 
-            load_4bit=True)
+        self.model_path = "llava-hf/llava-1.5-7b-hf"
+        # self.model_path = "liuhaotian/llava-v1.6-mistral-7b"
+
+        # self.tokenizer, self.model, self.image_processor, self.context_len = load_pretrained_model(
+        #     model_path = self.model_path, 
+        #     model_name=get_model_name_from_path(self.model_path), 
+        #     model_base=None, 
+        #     load_8bit=False, 
+        #     load_4bit=True)
         
-        self.conv_mode = "llava_v0"
-        
+        # self.conv_mode = "llava_v0"
         self.writer = SummaryWriter()
-
         self.image_dir = 'data/remote14'
-        # self.train_dataset = Remote14(root_dir=self.image_dir, is_train=True)
-        # self.val_dataset = Remote14(root_dir=self.image_dir, is_val=True)
-        self.test_dataset = Remote14(root_dir=self.image_dir, is_test=True)
+        self.topil = ToPILImage()
+        
+        self.train_dataset = Remote14_raw(root_dir=self.image_dir, is_train=True)
+        self.val_dataset = Remote14_raw(root_dir=self.image_dir, is_val=True)
+        self.test_dataset = Remote14_raw(root_dir=self.image_dir, is_test=True)
 
-        # self.train_loader = DataLoader(
-        #                         self.train_dataset,
-        #                         batch_size=bs,
-        #                         shuffle=True,
-        #                         pin_memory=True
-        #                     )
-        # self.val_loader = DataLoader(
-        #                         self.val_dataset,
-        #                         batch_size=bs,
-        #                         shuffle=False,
-        #                         pin_memory=True
-        #                     )
+        self.train_loader = DataLoader(
+                                self.train_dataset,
+                                batch_size=bs,
+                                shuffle=True,
+                                pin_memory=True
+                            )
+        self.val_loader = DataLoader(
+                                self.val_dataset,
+                                batch_size=bs,
+                                shuffle=False,
+                                pin_memory=True
+                            )
         self.test_loader = DataLoader(
                                 self.test_dataset,
                                 batch_size=bs,
@@ -87,16 +93,17 @@ class LLaVAClassifier:
                                 pin_memory=True
                             )
 
-        self.classes = self.test_dataset.classes
+        self.classes = ['back', 'bottom', 'bottomleftback', 'bottomleftfront', 'bottomrightback', 'bottomrightfront', 'front', 'left', 'right', 
+                        'top', 'topleftback', 'topleftfront', 'toprightback', 'toprightfront']
         self.metrics = self._reset_metrics()
 
-        self.adapter = Adapter().to(self.device)
-        self.optimizer = optim.Adam(self.adapter.parameters(), lr=1e-1, weight_decay=1e-4)
-        self.criterion = nn.CrossEntropyLoss()
+        # self.adapter = Adapter().to(self.device)
+        # self.optimizer = optim.Adam(self.adapter.parameters(), lr=1e-1, weight_decay=1e-4)
+        # self.criterion = nn.CrossEntropyLoss()
 
-        self.warmup_epochs=3
-        self.scheduler_cosine = torch.optim.lr_scheduler.CosineAnnealingLR(self.optimizer, T_max=3, eta_min=1e-6)
-        self.scheduler = GradualWarmupScheduler(self.optimizer, multiplier=1, total_epoch=self.warmup_epochs, after_scheduler=self.scheduler_cosine)
+        # self.warmup_epochs=3
+        # self.scheduler_cosine = torch.optim.lr_scheduler.CosineAnnealingLR(self.optimizer, T_max=3, eta_min=1e-6)
+        # self.scheduler = GradualWarmupScheduler(self.optimizer, multiplier=1, total_epoch=self.warmup_epochs, after_scheduler=self.scheduler_cosine)
 
     def _reset_metrics(self) -> Dict[str, Dict[str, List[int]]]:
         self.metrics = {'train': {'gts': [], 'preds': []}, 'val': {'gts': [], 'preds': []}, 'test': {'gts': [], 'preds': []}}
@@ -118,7 +125,6 @@ class LLaVAClassifier:
                 top_p=1.0,
                 max_new_tokens=100,
                 streamer=streamer,
-                #use_cache=True
             )
     
     def ask_question(self, image: Image, question: str) -> str:
@@ -126,8 +132,10 @@ class LLaVAClassifier:
         inp = DEFAULT_IMAGE_TOKEN + '\n' + question
         conv.append_message(conv.roles[0], inp)
         conv.append_message(conv.roles[1], None)
-        image_tensor = self.image_processor.preprocess(image, return_tensors='pt', do_rescale=False)['pixel_values'].to(self.model.device)
-        input_ids = tokenizer_image_token(inp, self.tokenizer, IMAGE_TOKEN_INDEX, return_tensors='pt').unsqueeze(0).cuda()
+        print(inp)
+        print(conv.get_prompt())
+        image_tensor = self.image_processor.preprocess(inp, return_tensors='pt', do_rescale=False)['pixel_values'].to(self.model.device)
+        input_ids = tokenizer_image_token(question, self.tokenizer, IMAGE_TOKEN_INDEX, return_tensors='pt').unsqueeze(0).cuda()
         stop_str = conv.sep if conv.sep_style != SeparatorStyle.TWO else conv.sep2
         streamer = TextIteratorStreamer(self.tokenizer, skip_prompt=True, timeout=20.0)
         thread = Thread(target=self.generate_text, args=(input_ids, image_tensor, streamer))
@@ -158,210 +166,66 @@ class LLaVAClassifier:
         plt.title(wrapped_title)
         plt.show()
         return generated_text
+    
+    def prompt(self, image: Image, question: str) -> str:
+        # image_url = "https://llava-vl.github.io/static/images/view.jpg"
+        # image = Image.open(requests.get(image_url, stream=True).raw)
+        quantization_config = BitsAndBytesConfig(
+            load_in_4bit=True,
+            bnb_4bit_compute_dtype=torch.float16
+        )
+        pipe = pipeline("image-to-text", model=self.model_path, model_kwargs={"quantization_config": quantization_config})
+        prompt = "USER: <image>\n" + question + "\nASSISTANT:"
+
+        outputs = pipe(image, prompt=prompt, generate_kwargs={"max_new_tokens": 200})
+        return outputs[0]["generated_text"]
 
     def train_adapter(self, epochs: int = 10) -> None:
-        self.model.eval()  # Freeze the CLIP model
-        self.adapter.train()
+        # self.model.eval()  
+        # self.adapter.train()
 
-        best_val_loss = float('inf')  
+        quantization_config = BitsAndBytesConfig(
+            load_in_4bit=True,
+            bnb_4bit_compute_dtype=torch.float16
+        )
+        pipe = pipeline("image-to-text", model=self.model_path, model_kwargs={"quantization_config": quantization_config}) 
+        question = (
+            "Tell me from which direction is the photo taken, be as precise as possible and choose from the following options: "
+            "0: back, 1: bottom, 2: bottom left back, 3: bottom left front, 4: bottom right back, 5: bottom right front, 6: front, 7: left, 8: right, 9: top, 10: top left back, 11: top left front, 12: top right back, 13: top right front?"
+        )
 
         for epoch in range(epochs):
             # Training loop
-            for batch in tqdm(self.test_loader, desc=f"Epoch {epoch+1}/{epochs}"):
+            for batch in tqdm(self.train_loader, desc=f"Epoch {epoch+1}/{epochs}"):
                 images, labels = batch
-                
-                conv = conv_templates[self.conv_mode].copy()
-                images_tensor = self.image_processor.preprocess(images, return_tensors='pt', do_rescale=False)['pixel_values'].to(self.model.device)
+                batch_predictions = []
+                batch_labels = []
+                batch_generated_text = []
 
-                # prompt = "Which direction is the object in the photo observed from? Only following options: back, \
-                #     bottom, bottomleftback, bottomleftfront, bottomrightback, bottomrightfront,\
-                #           front, left, right, top, topleftback, topleftfront, toprightback, toprightfront."
+                images_pil = [self.topil(image) for image in images]
+                for i, image_pil in enumerate(images_pil):
+                    prompt = f"USER: <image>\n{question}\nASSISTANT:"
+                    generated_text = pipe(image_pil, prompt=prompt, generate_kwargs={"max_new_tokens": 200})[0]["generated_text"]
+                    wrapped_text = "\n".join(textwrap.wrap(generated_text, width=40))
+                    batch_generated_text.append(wrapped_text)
 
-                # prompt = "Tell me from which direction is the photo taken. 1: back, 2: bottom, 3: bottom left back, 4: bottom leftf ront, \
-                #     5: bottom right back, 6: bottom right front,7: front, 8: left, 9: right, 10: top, 11: top left back, 12: top left front, \
-                #     13: top right back, 14: top right front"
-                
-                # prompt = "Tell me from which direction is the photo taken. back, bottom, bottom left back, bottom left front, \
-                #     bottom right back, bottom right front, front, left, right, top, top left back, top left front, \
-                #     top right back, top right front"
-                
-                # prompt = "Tell me from which direction is the photo taken: back, bottom, bottom left back, bottom left front, \
-                #      bottom right back, bottom right front, front, left, right, top, top left back, top left front, \
-                #      top right back, top right front?"
-                
-                #prompt = "Which direction is the photo taken from: back, bottom, front, left, right, top?"
-                
-                #prompt = "Which direction is the object in the photo observed from?\n"
+                    parsed_label = generated_text.split("ASSISTANT:")[-1].strip()
+                    wrapped_label = "\n".join(textwrap.wrap(parsed_label, width=40))
+                    batch_predictions.append(wrapped_label)
 
-                #prompt = "Tell me from which direction is the photo taken. Answer shortly in a word. \n"
+                    gt_label = self.classes[labels[i].cpu().item()]
+                    batch_labels.append(gt_label)
 
-                # prompt = "A remote is shown in the photo. In one or two words, tell me from which direction is the camera from. Only following options: back, \
-                #     bottom, bottomleftback, bottomleftfront, bottomrightback, bottomrightfront,\
-                #     front, left, right, top, topleftback, topleftfront, toprightback, toprightfront."
-                
-                prompt = "Describe what you see in the photo. Tell me in a short phrase the camera position. \n"
-                # prompt = "Describe what you see in the photo. \n"
-
-
-                inp = DEFAULT_IMAGE_TOKEN + '\n' + prompt
-                conv.append_message(conv.roles[0], inp)
-                conv.append_message(conv.roles[1], None)
-                # prompt = conv.get_prompt()
-            
-                input_ids = tokenizer_image_token(inp, self.tokenizer, IMAGE_TOKEN_INDEX, return_tensors='pt').unsqueeze(0).cuda()
-                stop_str = conv.sep if conv.sep_style != SeparatorStyle.TWO else conv.sep2
-                #keywords = [stop_str]
-                streamer = TextIteratorStreamer(self.tokenizer, skip_prompt=True, timeout=20.0)
-                
-                thread = Thread(target=self.generate_text, args=(input_ids, images_tensor, streamer))
-                thread.start()
-                prepend_space = False
-                generated_text = ""
-                
-                for new_text in streamer:
-                    if new_text == " ":
-                        prepend_space = True
-                        continue
-                    if new_text.endswith(stop_str):
-                        new_text = new_text[:-len(stop_str)].strip()
-                        prepend_space = False
-                    elif prepend_space:
-                        new_text = " " + new_text
-                        prepend_space = False
-                    if len(new_text):
-                        generated_text += new_text
-                if prepend_space:
-                    generated_text += " "
-                thread.join()
-
-                generated_text = generated_text.replace("</s>", "").strip()
-                print(generated_text)
-                img = images[0].cpu().numpy().transpose((1, 2, 0))
-                gt_label = self.classes[labels[0].cpu().item()]  
-                plt.imshow(img)
-                plt.title(f"GT: {gt_label}, Pred: {generated_text}")
-                #plt.title(generated_text)
+                fig, axes = plt.subplots(1, len(images), figsize=(15, 5))
+                for j, ax in enumerate(axes):
+                    img = images[j].cpu().numpy().transpose((1, 2, 0))
+                    ax.imshow(img)
+                    ax.set_title(f"GT: {labels[j]}: {batch_labels[j]}, Pred: {batch_predictions[j]}")
+                    ax.text(0.5, -0.1, batch_generated_text[j], transform=ax.transAxes, ha='center', va='top', fontsize=12, color="black")
+                    ax.axis('off')
                 plt.show()
-            
-
-
-
-            #     text_inputs = self.processor(text=generated_text, return_tensors="pt", padding=True).to(self.device)
-            #     with torch.no_grad():
-            #         text_features = self.model.get_text_features(**text_inputs)
-            #     text_features = text_features / text_features.norm(dim=-1, keepdim=True)
-
-            #     cos_sim = torch.matmul(image_features, text_features.transpose(0, 1))
-            #     predicted_classes = torch.argmax(cos_sim, dim=-1)
-
-            #     loss = self.criterion(cos_sim, labels.to(self.device))
-
-            #     train_loss = loss.item()
-            #     self.optimizer.zero_grad()
-            #     loss.backward()
-
-            #     self.optimizer.step()
-            #     self.scheduler.step()
-
-            #     self.metrics['train']['preds'].extend(predicted_classes.cpu().tolist())
-            #     self.metrics['train']['gts'].extend(labels.cpu().tolist())
-
-            # # Validation loop
-            # self.adapter.eval()  
-            # with torch.no_grad():
-            #     val_losses = []
-            #     for batch in tqdm(self.val_loader, desc=f"Validation {epoch+1}/{epochs}"):
-            #         images, labels = batch
-            #         images, labels = images.to(self.device), labels.to(self.device)
-                    
-            #         conv = conv_templates[self.conv_mode].copy()
-            #         images_tensor = self.image_processor.preprocess(images, return_tensors='pt', do_rescale=False)['pixel_values'].to(self.model.device)
-                    
-            #         # image_features = self.adapter(embeds)
-
-            #         # prompt = "Which direction is the object in the photo observed from? Only following options: back, \
-            #         #     bottom, bottomleftback, bottomleftfront, bottomrightback, bottomrightfront,\
-            #         #           front, left, right, top, topleftback, topleftfront, toprightback, toprightfront."
-                    
-            #         prompt = "Which direction is the object in the photo observed from?\n"
-            #         # prompt = "Describe the picture."
-
-            #         inp = DEFAULT_IMAGE_TOKEN + '\n' + prompt
-            #         conv.append_message(conv.roles[0], inp)
-            #         conv.append_message(conv.roles[1], None)
-            #         #prompt = conv.get_prompt()
-                
-            #         input_ids = tokenizer_image_token(inp, self.tokenizer, IMAGE_TOKEN_INDEX, return_tensors='pt').unsqueeze(0).cuda()
-            #         stop_str = conv.sep if conv.sep_style != SeparatorStyle.TWO else conv.sep2
-            #         #keywords = [stop_str]
-            #         streamer = TextIteratorStreamer(self.tokenizer, skip_prompt=True, timeout=20.0)
-        
-            #         def generate_text():
-            #             with torch.inference_mode() and torch.cuda.amp.autocast():
-            #                 self.model.generate(
-            #                     inputs=input_ids,
-            #                     images=images_tensor,
-            #                     do_sample=True,
-            #                     temperature=0.1,
-            #                     top_p=1.0,
-            #                     max_new_tokens=100,
-            #                     streamer=streamer,
-            #                     #use_cache=True
-            #                 )
-                    
-            #         thread = Thread(target=generate_text)
-            #         thread.start()
-            #         prepend_space = False
-            #         generated_text = ""
-                    
-            #         for new_text in streamer:
-            #             if new_text == " ":
-            #                 prepend_space = True
-            #                 continue
-            #             if new_text.endswith(stop_str):
-            #                 new_text = new_text[:-len(stop_str)].strip()
-            #                 prepend_space = False
-            #             elif prepend_space:
-            #                 new_text = " " + new_text
-            #                 prepend_space = False
-            #             if len(new_text):
-            #                 generated_text += new_text
-            #         if prepend_space:
-            #             generated_text += " "
-            #         thread.join()
-
-            #         print(generated_text)
-
-            #         text_inputs = self.processor(text=self.questions, return_tensors="pt", padding=True).to(self.device)
-            #         with torch.no_grad():
-            #             text_features = self.model.get_text_features(**text_inputs)
-            #         text_features = text_features / text_features.norm(dim=-1, keepdim=True)
-
-            #         cos_sim = torch.matmul(image_features, text_features.transpose(0, 1))
-
-            #         predicted_classes = torch.argmax(cos_sim, dim=-1)
-            #         self.metrics['val']['preds'].extend(predicted_classes.cpu().tolist())
-            #         self.metrics['val']['gts'].extend(labels.cpu().tolist())
-
-            #         val_loss = self.criterion(cos_sim, labels.to(self.device))
-            #         val_losses.append(val_loss.item())
-
-            # train_acc = sum([1 for gt, pred in zip(self.metrics['train']['gts'], self.metrics['train']['preds']) if gt == pred]) / len(self.metrics['train']['gts'])
-            # val_acc = sum([1 for gt, pred in zip(self.metrics['val']['gts'], self.metrics['val']['preds']) if gt == pred]) / len(self.metrics['val']['gts'])
-            # self.writer.add_scalars('Acc', {'Train': train_acc, 'Validation': val_acc}, epoch)
-
-            # mean_val_loss = sum(val_losses) / len(val_losses)
-
-            # if mean_val_loss < best_val_loss:
-            #     best_val_loss = mean_val_loss
-            #     torch.save(self.adapter.state_dict(), self.save_path)
-            #     print(f"Model saved at epoch {epoch+1}, with validation loss: {mean_val_loss}, path: {self.save_path}, train_acc: {train_acc}, val_acc: {val_acc}")
-
-            # self.writer.add_scalars('Losses', {'Train': train_loss, 'Val': mean_val_loss}, epoch)
-            # self.metrics = self._reset_metrics()
 
 if __name__ == '__main__':
-    llava_classifier = LLaVAClassifier(bs=1)
-    #llava_classifier.train_adapter(epochs=50)
-    llava_classifier.ask_question(llava_classifier.load_image('/home/cc/Downloads/3751235deeae4e8a88709fd74fb700eb.jpeg'), "Describe what you see in the photo. \n")
-    llava_classifier.ask_question(llava_classifier.load_image('/home/cc/Downloads/3751235deeae4e8a88709fd74fb700eb.jpeg'), "What do you see in this photo? Is it a cat? \n")
+    llava_classifier = LLaVAClassifier(bs=4)
+    llava_classifier.train_adapter(epochs=50)
+    # llava_classifier.ask_question(llava_classifier.load_image('/home/cc/Downloads/cat-container.jpg'), "What do you see in this photo? Is it a cat? \n")
