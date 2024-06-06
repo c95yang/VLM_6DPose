@@ -12,7 +12,7 @@ import random
 import torch.nn as nn
 import torch.optim as optim
 #from utils.clip_adapter import clip
-from adapter import Adapter
+from adapter import MLPAdapter, TransformerAdapter
 from tqdm import tqdm
 from torch.utils.tensorboard import SummaryWriter
 from warmup_scheduler import GradualWarmupScheduler
@@ -20,7 +20,7 @@ from warmup_scheduler import GradualWarmupScheduler
 class CLIPClassifier:
     def __init__(self, device: torch.device, bs: int, model_name: str) -> None:
         self.save_path = 'ckpts/adapter.pth'
-        self.load_path = 'ckpts/adapter.pth'
+        self.load_path = 'ckpts/adapter_16_1e-2.pth'
         self.device = device
         self.model_name = model_name
         self.model = CLIPModel.from_pretrained(self.model_name).to(device)
@@ -56,7 +56,9 @@ class CLIPClassifier:
         self.class_anchors = self._prepare_anchors(2)
         self.metrics = self._reset_metrics()
 
-        self.adapter = Adapter(in_features=768, hidden_features=768).to(device)
+        self.adapter = MLPAdapter().to(device)
+        # self.adapter = TransformerAdapter().to(device)
+
         self.optimizer = optim.Adam(self.adapter.parameters(), lr=1e-2, weight_decay=1e-4)
         self.criterion = nn.CrossEntropyLoss()
 
@@ -231,7 +233,7 @@ class CLIPClassifier:
 
             plt.show()
 
-
+        print(classification_report(self.metrics[split]['gts'], self.metrics[split]['preds'], target_names=self.classes))
         self._reset_metrics()
 
     def train_adapter(self, epochs: int = 10) -> None:
@@ -255,7 +257,7 @@ class CLIPClassifier:
                 with torch.no_grad():
                     text_features = self.model.get_text_features(**text_inputs)
                 text_features = text_features / text_features.norm(dim=-1, keepdim=True)
-                
+
                 cos_sim = torch.matmul(image_features, text_features.transpose(0, 1))
                 predicted_classes = torch.argmax(cos_sim, dim=-1)
                 # print(cos_sim)     
@@ -273,6 +275,7 @@ class CLIPClassifier:
 
                 self.optimizer.step()
                 self.scheduler.step()
+                print(f"Lr: {self.optimizer.param_groups[0]['lr']}")
 
                 self.metrics['train']['preds'].extend(predicted_classes.cpu().tolist())
                 self.metrics['train']['gts'].extend(labels.cpu().tolist())
@@ -317,21 +320,18 @@ class CLIPClassifier:
                 print(f"Model saved at epoch {epoch+1}, with validation loss: {mean_val_loss}, path: {self.save_path}, train_acc: {train_acc}, val_acc: {val_acc}")
 
             self.writer.add_scalars('Losses', {'Train': train_loss, 'Val': mean_val_loss}, epoch)
-
-            #print(classification_report(self.metrics['train']['gts'], self.metrics['train']['preds'], target_names=self.classes))
-            #print(classification_report(self.metrics['test']['gts'], self.metrics['test']['preds'], target_names=self.classes))
             self.metrics = self._reset_metrics()
 
 if __name__ == '__main__':
-    # model_name = 'openai/clip-vit-base-patch16' 
-    model_name = 'openai/clip-vit-large-patch14-336' 
+    model_name = 'openai/clip-vit-base-patch16' 
+    # model_name = 'openai/clip-vit-large-patch14-336' 
     print(f' Model: {model_name}')
     device = torch.device("cuda") if torch.cuda.is_available() else torch.device("cpu")
 
-    clip_classifier = CLIPClassifier(device, model_name=model_name, bs=2)
+    classifier = CLIPClassifier(device, model_name=model_name, bs=16)
 
-    # clip_classifier.classify_zeroshot(split='train' )
-    # clip_classifier.classify_fewshotshot(split='train')
+    # classifier.classify_zeroshot(split='train' )
+    # classifier.classify_fewshotshot(split='train')
 
-    clip_classifier.train_adapter(epochs=50)
-    # clip_classifier.classify_withadapter(split='val')
+    # classifier.train_adapter(epochs=50)
+    classifier.classify_withadapter(split='val')
