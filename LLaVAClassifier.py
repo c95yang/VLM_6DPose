@@ -97,13 +97,13 @@ class LLaVAClassifier:
                         'top', 'topleftback', 'topleftfront', 'toprightback', 'toprightfront']
         self.metrics = self._reset_metrics()
 
-        # self.adapter = Adapter().to(self.device)
-        # self.optimizer = optim.Adam(self.adapter.parameters(), lr=1e-1, weight_decay=1e-4)
-        # self.criterion = nn.CrossEntropyLoss()
+        self.adapter = Adapter().to(self.device)
+        self.optimizer = optim.Adam(self.adapter.parameters(), lr=1e-1, weight_decay=1e-4)
+        self.criterion = nn.CrossEntropyLoss()
 
-        # self.warmup_epochs=3
-        # self.scheduler_cosine = torch.optim.lr_scheduler.CosineAnnealingLR(self.optimizer, T_max=3, eta_min=1e-6)
-        # self.scheduler = GradualWarmupScheduler(self.optimizer, multiplier=1, total_epoch=self.warmup_epochs, after_scheduler=self.scheduler_cosine)
+        self.warmup_epochs=3
+        self.scheduler_cosine = torch.optim.lr_scheduler.CosineAnnealingLR(self.optimizer, T_max=3, eta_min=1e-6)
+        self.scheduler = GradualWarmupScheduler(self.optimizer, multiplier=1, total_epoch=self.warmup_epochs, after_scheduler=self.scheduler_cosine)
 
     def _reset_metrics(self) -> Dict[str, Dict[str, List[int]]]:
         self.metrics = {'train': {'gts': [], 'preds': []}, 'val': {'gts': [], 'preds': []}, 'test': {'gts': [], 'preds': []}}
@@ -182,7 +182,7 @@ class LLaVAClassifier:
 
     def train_adapter(self, epochs: int = 10) -> None:
         # self.model.eval()  
-        # self.adapter.train()
+        self.adapter.train()
 
         quantization_config = BitsAndBytesConfig(
             load_in_4bit=True,
@@ -191,8 +191,11 @@ class LLaVAClassifier:
         pipe = pipeline("image-to-text", model=self.model_path, model_kwargs={"quantization_config": quantization_config}) 
         question = (
             "Tell me from which direction is the photo taken, be as precise as possible and choose from the following options: "
-            "0: back, 1: bottom, 2: bottom left back, 3: bottom left front, 4: bottom right back, 5: bottom right front, 6: front, 7: left, 8: right, 9: top, 10: top left back, 11: top left front, 12: top right back, 13: top right front?"
+            "0: back, 1: bottom, 2: bottom left back, 3: bottom left front, 4: bottom right back, 5: bottom right front, 6: front, 7: left, 8: right, 9: top, 10: top left back, 11: top left front, 12: top right back, 13: top right front? "
+            "Answer solely with the option, not with a sentence."
         )
+
+        # Tell me from which direction is the photo taken, be as precise as possible and choose from the following options: 0: back, 1: bottom, 2: bottom left back, 3: bottom left front, 4: bottom right back, 5: bottom right front, 6: front, 7: left, 8: right, 9: top, 10: top left back, 11: top left front, 12: top right back, 13: top right front? Answer solely with the option, not with a sentence
 
         for epoch in range(epochs):
             # Training loop

@@ -2,7 +2,7 @@ import numpy as np
 import torch
 import torch.nn as nn
 
-class Adapter(nn.Module):
+class MLPAdapter(nn.Module):
     def __init__(self, in_features=512, hidden_features=512, adapter_ratio=1, dropout=0.075):
         super().__init__()
 
@@ -33,3 +33,39 @@ class Adapter(nn.Module):
         img_feat = self.layers(feat) #([266, 512])
         # img_feat = img_feat * self.adapter_ratio + feat * (1 - self.adapter_ratio)
         return img_feat
+
+
+class TransformerAdapter(nn.Module):
+    def __init__(self):
+        super().__init__()
+        self.in_features = 512
+        self.hidden_features = 512
+        self.nhead = 8
+        self.dropout = 0.1
+        self.num_layers = 1
+         
+        self.input_projection = nn.Sequential(
+            nn.BatchNorm1d(self.in_features),
+            nn.Dropout(self.dropout),
+            # nn.Linear(in_features=self.in_features, out_features=self.hidden_features),
+            # nn.GELU()
+        )
+
+        self.encoder_layer = nn.TransformerEncoderLayer(d_model=self.hidden_features, nhead=self.nhead)
+        # self.transformer_encoder = nn.TransformerEncoder(encoder_layer, num_layers=self.num_layers)
+
+        self.output_projection = nn.Sequential(
+            nn.BatchNorm1d(self.hidden_features),
+            nn.Dropout(self.dropout),
+            # nn.Linear(in_features=self.hidden_features, out_features=self.in_features),
+            # nn.GELU()
+        )
+
+        for param in self.parameters():
+            param.requires_grad = True
+
+    def forward(self, x):
+        out = self.input_projection(x).unsqueeze(0)
+        out = self.encoder_layer(out).squeeze(0)
+        out = self.output_projection(out)
+        return out    
