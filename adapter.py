@@ -1,14 +1,14 @@
 import numpy as np
 import torch
 import torch.nn as nn
+from mamba_ssm import Mamba
 
 class MLPAdapter(nn.Module):
-    def __init__(self, in_features=512, hidden_features=512, adapter_ratio=1, dropout=0.075):
+    def __init__(self, in_features=512, hidden_features=512, dropout=0.075):
         super().__init__()
 
         self.in_features = in_features
         self.hidden_features = hidden_features
-        # self.adapter_ratio = adapter_ratio
         self.dropout = dropout
 
         self.layers = nn.Sequential(
@@ -30,18 +30,17 @@ class MLPAdapter(nn.Module):
             param.requires_grad = True
 
     def forward(self, feat):
-        img_feat = self.layers(feat) #([266, 512])
-        # img_feat = img_feat * self.adapter_ratio + feat * (1 - self.adapter_ratio)
+        img_feat = self.layers(feat)
         return img_feat
 
 
 class TransformerAdapter(nn.Module):
-    def __init__(self):
+    def __init__(self, in_features=512, hidden_features=512, dropout=0.1):
         super().__init__()
-        self.in_features = 512
-        self.hidden_features = 512
+        self.in_features = in_features
+        self.hidden_features = hidden_features
         self.nhead = 8
-        self.dropout = 0.1
+        self.dropout = dropout
         self.num_layers = 2
          
         self.input_projection = nn.Sequential(
@@ -71,11 +70,37 @@ class TransformerAdapter(nn.Module):
         return out    
 
 class MambaAdapter(nn.Module):
-    def __init__(self, in_features=512, hidden_features=512, adapter_ratio=1, dropout=0.075):
+    def __init__(self, in_features=512, hidden_features=512, dropout=0.2):
         super().__init__()
+        self.in_features = in_features
+        self.dropout = dropout
 
+        self.mamba = nn.Sequential(
+            Mamba(d_model=512),
+        )
 
+        self.projection = nn.Sequential(
+            nn.BatchNorm1d(self.in_features),
+            nn.Dropout(self.dropout),
+            # nn.Linear(in_features=self.in_features, out_features=self.in_features),
+            # nn.GELU(),
+        )
+
+        for param in self.parameters():
+            param.requires_grad = True
 
     def forward(self, feat):
-        img_feat = feat
-        return img_feat
+        out = self.projection(feat)
+
+        out = out.unsqueeze(1)
+        out = self.mamba(out)
+        out = out.squeeze(1)
+
+        # out = self.projection(out)
+
+        # out = out.unsqueeze(1)
+        # out = self.mamba(out)
+        # out = out.squeeze(1)
+
+        out = self.projection(out)
+        return out
