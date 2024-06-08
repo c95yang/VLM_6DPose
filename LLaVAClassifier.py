@@ -1,7 +1,6 @@
 from typing import List, Dict
 import requests
 from io import BytesIO
-import os
 import textwrap
 import matplotlib.pyplot as plt
 from PIL import Image
@@ -10,16 +9,13 @@ from transformers import BitsAndBytesConfig, pipeline
 from torchvision.transforms import ToPILImage
 import torch
 from threading import Thread
-from sklearn.metrics import classification_report
 
 from torch.utils.data import DataLoader
-from datasets import Remote14_raw
+from utils.datasets import Remote14_raw
 from tqdm import tqdm
 #from transformers import CLIPProcessor, CLIPModel
-import random
 import torch.nn as nn
 import torch.optim as optim
-from utils.clip_adapter import clip
 from transformers import CLIPProcessor, CLIPModel
 from llava.model.builder import load_pretrained_model
 from llava.mm_utils import (
@@ -43,7 +39,7 @@ from llava.constants import (
 )
 from llava.conversation import conv_templates, SeparatorStyle
 
-from adapter import Adapter
+from models.adapter import Adapter
 from tqdm import tqdm
 from torch.utils.tensorboard import SummaryWriter
 
