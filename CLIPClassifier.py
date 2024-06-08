@@ -23,6 +23,7 @@ class CLIPClassifier:
                  weight_decay,
                  image_dir,
                  ) -> None:
+        
         self.device = device
         self.bs = bs
         self.model_name = model_name
@@ -45,9 +46,8 @@ class CLIPClassifier:
         elif self.adapter_type == 'mamba':
             self.adapter = MambaAdapter().to(device)
 
-        self.classes = ['back', 'bottom', 'bottomleftback', 'bottomleftfront', 
-                        'bottomrightback', 'bottomrightfront', 'front', 'left', 
-                        'right', 'top', 'topleftback', 'topleftfront', 'toprightback', 'toprightfront']
+        self.classes = ['back', 'bottom', 'bottomleftback', 'bottomleftfront', 'bottomrightback', 'bottomrightfront', 'front', 
+                        'left', 'right', 'top', 'topleftback', 'topleftfront', 'toprightback', 'toprightfront']
         self.questions = self._prepare_prompt()
         self.metrics = self._reset_metrics()
 
@@ -74,10 +74,10 @@ if __name__ == '__main__':
     # classify_fewshotshot(model_class=classifier, split='train')
 
     hparams = {
-        'model_name': 'openai/clip-vit-base-patch16', # 'openai/clip-vit-large-patch14-336'
+        'model_name': 'openai/clip-vit-base-patch16', # 'openai/clip-vit-large-patch14-336', 'openai/clip-vit-base-patch16'
         'adapter_type': 'mamba', # 'mlp', 'transformer', 'mamba'
         'save_path': 'ckpts/adapter.pth',
-        'load_path': 'ckpts/adapter_mamba_32_1e-3.pth',
+        'load_path': 'ckpts/adapter.pth',
         'device': torch.device("cuda"),
         'lr': 1e-3,
         'weight_decay': 1e-4,
@@ -87,5 +87,5 @@ if __name__ == '__main__':
 
     classifier = CLIPClassifier(**hparams)
 
-    # train_adapter(model_class=classifier, epochs=300)
-    test_adapter(model_class=classifier, split='val')
+    train_adapter(model_class=classifier, epochs=300, pureclip=False)
+    # test_adapter(model_class=classifier, split='val')
