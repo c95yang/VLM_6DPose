@@ -4,7 +4,6 @@ from sklearn.metrics import classification_report
 from utils.datasets import Remote14
 from torch.utils.data import DataLoader
 
-
 def test_adapter(model_class, split: str = 'val') -> None:
         if split == 'val':
             val_dataset = Remote14(root_dir=model_class.image_dir, is_val=True)

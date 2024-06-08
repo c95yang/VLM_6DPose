@@ -1,9 +1,25 @@
 import torch
 from tqdm import tqdm
+from torchvision.transforms import ToPILImage
+from transformers import BitsAndBytesConfig, pipeline
 from utils.datasets import Remote14
 from torch.utils.data import DataLoader
 
-def train_adapter(model_class, epochs) -> None:
+def parse_output(output: str) -> str:
+    return output.split("ASSISTANT:")[-1].strip()
+
+def train_adapter(model_class, epochs, pureclip = True) -> None:
+    question = "There is a remote in the image. Describe what you see and tell me from which direction is the photo taken."
+    prompt = "USER: <image>\n" + question + "\nASSISTANT:"
+
+    topil = ToPILImage()
+    llava_path = "llava-hf/llava-1.5-7b-hf"
+    quantization_config = BitsAndBytesConfig(
+        load_in_4bit=True,
+        bnb_4bit_compute_dtype=torch.float16
+    )
+    pipe = pipeline("image-to-text", model=llava_path, model_kwargs={"quantization_config": quantization_config})
+
     train_dataset = Remote14(root_dir=model_class.image_dir, is_train=True)
     train_loader = DataLoader(train_dataset, batch_size=model_class.bs, shuffle=True, pin_memory=True)
     
@@ -21,15 +37,21 @@ def train_adapter(model_class, epochs) -> None:
             images, labels = batch
             #print("images: ", images)
 
-            inputs = model_class.processor(images=images, return_tensors="pt", do_rescale=False).to(model_class.device)
-
-            embeds = model_class.model.get_image_features(**inputs)
-            embeds = embeds / embeds.norm(p=2, dim=-1, keepdim=True)
-
-            # print("embeds: ", embeds)
-
-            image_features = model_class.adapter(embeds)
-            # print("image_features: ", image_features)
+            if pureclip == True:
+                inputs = model_class.processor(images=images, return_tensors="pt", do_rescale=False).to(model_class.device)
+                embeds = model_class.model.get_image_features(**inputs)
+                embeds = embeds / embeds.norm(p=2, dim=-1, keepdim=True)
+                image_features = model_class.adapter(embeds)
+            else:
+                ########### llava text output processed by clip processor ########################################
+                images = [topil(image) for image in images]
+                descriptions = pipe(images, prompt=prompt, generate_kwargs={"max_new_tokens": 77})
+                descriptions = [parse_output(description[0]["generated_text"]) for description in descriptions]
+                # print("descriptions: ", descriptions)
+                descriptions_inputs = model_class.processor(text=descriptions, return_tensors="pt", padding=True, truncation=True, max_length=77).to(model_class.device)
+                descriptions_features = model_class.model.get_text_features(**descriptions_inputs)
+                image_features = descriptions_features / descriptions_features.norm(dim=-1, keepdim=True)
+                ###################################################################################################
 
             text_inputs = model_class.processor(text=model_class.questions, return_tensors="pt", padding=True).to(model_class.device)
             with torch.no_grad():
@@ -43,7 +65,6 @@ def train_adapter(model_class, epochs) -> None:
             # print("predicted_classes:", predicted_classes)
 
             loss = model_class.criterion(cos_sim, labels.to(model_class.device))
-
             # print(f"Train_Loss: {loss}")
 
             train_loss = loss.item()
