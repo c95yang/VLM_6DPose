@@ -29,3 +29,4 @@ RUN python -m pip install \
     ftfy==6.1.1 \
     h5py==3.8.0 \
     matplotlib tensorboard\
+    mamba-ssm
