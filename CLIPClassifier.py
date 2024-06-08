@@ -11,16 +11,16 @@ from transformers import CLIPProcessor, CLIPModel
 import random
 import torch.nn as nn
 import torch.optim as optim
-#from utils.clip_adapter import clip
-from adapter import MLPAdapter, TransformerAdapter
+from adapter import MLPAdapter, TransformerAdapter, MambaAdapter
 from tqdm import tqdm
 from torch.utils.tensorboard import SummaryWriter
 from warmup_scheduler import GradualWarmupScheduler
 
 class CLIPClassifier:
-    def __init__(self, device: torch.device, bs: int, model_name: str) -> None:
-        self.save_path = 'ckpts/adapter.pth'
-        self.load_path = 'ckpts/adapter_16_1e-2.pth'
+    def __init__(self, device: torch.device, bs: int, model_name: str, adapter_type: str, load_path: str, save_path: str) -> None:
+        self.save_path = save_path
+        self.load_path = load_path
+        self.adapter_type = adapter_type
         self.device = device
         self.model_name = model_name
         self.model = CLIPModel.from_pretrained(self.model_name).to(device)
@@ -56,10 +56,12 @@ class CLIPClassifier:
         self.class_anchors = self._prepare_anchors(2)
         self.metrics = self._reset_metrics()
 
-        self.adapter = MLPAdapter().to(device)
-        # self.adapter = TransformerAdapter().to(device)
+        if self.adapter_type == 'mlp':
+            self.adapter = MLPAdapter().to(device)
+        elif self.adapter_type == 'transformer':
+            self.adapter = TransformerAdapter().to(device)
 
-        self.optimizer = optim.Adam(self.adapter.parameters(), lr=1e-2, weight_decay=1e-4)
+        self.optimizer = optim.Adam(self.adapter.parameters(), lr=1e-5, weight_decay=1e-4)
         self.criterion = nn.CrossEntropyLoss()
 
         self.warmup_epochs=3
@@ -85,7 +87,6 @@ class CLIPClassifier:
             images, label = batch
 
             texts = self._prepare_multiple_prompt()
-            # print("texts", texts)
 
             inputs = self.processor(texts, images, return_tensors="pt", padding=True)
             inputs.to(self.model.device)
@@ -172,15 +173,12 @@ class CLIPClassifier:
         self.adapter.eval()
         self.adapter.load_state_dict(torch.load(self.load_path))
 
-        batch_counter = 0
-
         for batch in dataloader:
-            batch_counter += 1
-
             images, labels = batch
 
             inputs = self.processor(images=images, return_tensors="pt", do_rescale=False)
             inputs.to(self.model.device)
+            print("inputs: ", inputs)
             embeds = self.model.get_image_features(**inputs)
             embeds = embeds / embeds.norm(p=2, dim=-1, keepdim=True)
             image_features = self.adapter(embeds) #([266, 512])
@@ -204,14 +202,13 @@ class CLIPClassifier:
 
             acc = sum([1 for gt, pred in zip(self.metrics[split]['gts'], self.metrics[split]['preds']) if gt == pred]) / len(self.metrics[split]['gts'])
             print(f"Accuracy: {acc}")
-
             print(self.metrics)
             
             num_images = len(images) 
             num_rows = 2
             num_cols = 8
 
-            fig, axes = plt.subplots(nrows=num_rows, ncols=num_cols, figsize=(20, 20))  # Create subplots with appropriate number of rows and columns
+            fig, axes = plt.subplots(nrows=num_rows, ncols=num_cols, figsize=(20, 20))  
             for ax_row in axes:
                 for ax in ax_row:
                     ax.axis('off')
@@ -220,13 +217,11 @@ class CLIPClassifier:
                 img = images[i].cpu().numpy().transpose((1, 2, 0))
 
                 pred_label = self.classes[predicted_classes[i]]
-                gt_label = self.classes[labels[i].cpu().item()]  # Assuming labels are scalar
+                gt_label = self.classes[labels[i].cpu().item()]  
 
-                row = i // num_cols  # Determine row index
-                col = i % num_cols   # Determine column index
-
-                # print(f"Row: {row}, Col: {col}")
-                ax = axes[row, col]  # Accessing the axes correctly
+                row = i // num_cols  
+                col = i % num_cols  
+                ax = axes[row, col]  
                 ax.imshow(img)
                 ax.set_title(pred_label, fontsize=12, color="green" if pred_label == gt_label else "red", pad=10)
                 ax.text(0.5, -0.1, gt_label, transform=ax.transAxes, ha='center', va='top', fontsize=12, color="black")
@@ -246,8 +241,11 @@ class CLIPClassifier:
             # Training loop
             for batch in tqdm(self.train_loader, desc=f"Epoch {epoch+1}/{epochs}"):
                 images, labels = batch
+                #print("images: ", images)
 
                 inputs = self.processor(images=images, return_tensors="pt", do_rescale=False).to(self.device)
+                #inputs = self.processor(images=images, return_tensors="pt").to(self.device)
+                #print("inputs: ", inputs)
                 embeds = self.model.get_image_features(**inputs)
                 embeds = embeds / embeds.norm(p=2, dim=-1, keepdim=True)
 
@@ -289,6 +287,7 @@ class CLIPClassifier:
                     images, labels = images.to(self.device), labels.to(self.device)
 
                     inputs = self.processor(images=images, return_tensors="pt", do_rescale=False).to(self.device)
+                    # inputs = self.processor(images=images, return_tensors="pt").to(self.device)
                     embeds = self.model.get_image_features(**inputs)
                     embeds = embeds / embeds.norm(p=2, dim=-1, keepdim=True)
                     image_features = self.adapter(embeds)
@@ -323,15 +322,17 @@ class CLIPClassifier:
             self.metrics = self._reset_metrics()
 
 if __name__ == '__main__':
-    model_name = 'openai/clip-vit-base-patch16' 
-    # model_name = 'openai/clip-vit-large-patch14-336' 
-    print(f' Model: {model_name}')
-    device = torch.device("cuda") if torch.cuda.is_available() else torch.device("cpu")
+    model_name = 'openai/clip-vit-base-patch16' # 'openai/clip-vit-large-patch14-336' 
+    adapter_type = 'transformer' # 'transformer', 'mamba'
+    save_path = 'ckpts/adapter.pth'
+    load_path = 'ckpts/adapter_transformer_16_1e-5.pth'
+    device = torch.device("cuda") 
 
-    classifier = CLIPClassifier(device, model_name=model_name, bs=16)
+    classifier = CLIPClassifier(device, model_name=model_name, bs=16, adapter_type=adapter_type, load_path=load_path, save_path=save_path)
+
+    # classifier.train_adapter(epochs=300)
+    classifier.classify_withadapter(split='val')
+
 
     # classifier.classify_zeroshot(split='train' )
     # classifier.classify_fewshotshot(split='train')
-
-    # classifier.train_adapter(epochs=50)
-    classifier.classify_withadapter(split='val')

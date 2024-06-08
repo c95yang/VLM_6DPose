@@ -42,7 +42,7 @@ class TransformerAdapter(nn.Module):
         self.hidden_features = 512
         self.nhead = 8
         self.dropout = 0.1
-        self.num_layers = 1
+        self.num_layers = 2
          
         self.input_projection = nn.Sequential(
             nn.BatchNorm1d(self.in_features),
@@ -52,7 +52,7 @@ class TransformerAdapter(nn.Module):
         )
 
         self.encoder_layer = nn.TransformerEncoderLayer(d_model=self.hidden_features, nhead=self.nhead)
-        # self.transformer_encoder = nn.TransformerEncoder(encoder_layer, num_layers=self.num_layers)
+        self.transformer_encoder = nn.TransformerEncoder(self.encoder_layer, num_layers=self.num_layers)
 
         self.output_projection = nn.Sequential(
             nn.BatchNorm1d(self.hidden_features),
@@ -66,6 +66,16 @@ class TransformerAdapter(nn.Module):
 
     def forward(self, x):
         out = self.input_projection(x).unsqueeze(0)
-        out = self.encoder_layer(out).squeeze(0)
+        out = self.transformer_encoder(out).squeeze(0)
         out = self.output_projection(out)
         return out    
+
+class MambaAdapter(nn.Module):
+    def __init__(self, in_features=512, hidden_features=512, adapter_ratio=1, dropout=0.075):
+        super().__init__()
+
+
+
+    def forward(self, feat):
+        img_feat = feat
+        return img_feat
