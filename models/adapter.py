@@ -2,7 +2,7 @@ import torch.nn as nn
 from mamba_ssm import Mamba
 
 class MLPAdapter(nn.Module):
-    def __init__(self, in_features=512, hidden_features=512, dropout=0.075):
+    def __init__(self, in_features=512, hidden_features=512, dropout=0.1):
         super().__init__()
 
         self.in_features = in_features
