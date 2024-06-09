@@ -96,8 +96,8 @@ if __name__ == '__main__':
         'device': torch.device("cuda"),
         'image_dir': 'data/remote14',
         'model_name': 'openai/clip-vit-base-patch16', # 'openai/clip-vit-large-patch14-336', 'openai/clip-vit-base-patch16'
-        'adapter_image_type': 'transformer', # 'mlp', 'transformer', 'mamba'
-        'adapter_descriptions_type': 'transformer', # 'mlp', 'transformer', 'mamba'
+        'adapter_image_type': 'mamba', # 'mlp', 'transformer', 'mamba'
+        'adapter_descriptions_type': 'mamba', # 'mlp', 'transformer', 'mamba'
         'lr': 1e-5,
         'weight_decay': 1e-4,
         'bs': 16,
