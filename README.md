@@ -10,3 +10,12 @@ cd pytorch-gradual-warmup-lr/
 python setup.py install (pip install .)
 cd ..
 ~~~
+
+## Train
+
+~~~
+python VLMClassifier.py
+~~~
+
+## Architecture
+![Architecture](./architecture.svg)
