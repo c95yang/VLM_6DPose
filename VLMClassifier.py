@@ -89,18 +89,18 @@ if __name__ == '__main__':
     # classify_fewshotshot(model_class=classifier, split='train')
 
     hparams = {
-        'model_name': 'openai/clip-vit-base-patch16', # 'openai/clip-vit-large-patch14-336', 'openai/clip-vit-base-patch16'
-        'adapter_image_type': 'mamba', # 'mlp', 'transformer', 'mamba'
-        'adapter_descriptions_type': 'mamba', # 'mlp', 'transformer', 'mamba'
         'save_path': 'ckpts/adapter_image.pth',
         'save_path_descriptions': 'ckpts/adapter_descriptions.pth', 
         'load_path': 'ckpts/adapter_image.pth',
         'load_path_descriptions': 'ckpts/adapter_descriptions.pth',
         'device': torch.device("cuda"),
-        'lr': 1e-4,
+        'image_dir': 'data/remote14',
+        'model_name': 'openai/clip-vit-base-patch16', # 'openai/clip-vit-large-patch14-336', 'openai/clip-vit-base-patch16'
+        'adapter_image_type': 'transformer', # 'mlp', 'transformer', 'mamba'
+        'adapter_descriptions_type': 'transformer', # 'mlp', 'transformer', 'mamba'
+        'lr': 1e-5,
         'weight_decay': 1e-4,
         'bs': 16,
-        'image_dir': 'data/remote14',
     }
 
     classifier = VLMClassifier(**hparams)
