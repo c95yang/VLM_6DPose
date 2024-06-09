@@ -46,6 +46,8 @@ class CLIPClassifier:
         elif self.adapter_type == 'mamba':
             self.adapter = MambaAdapter().to(device)
 
+        self.adapter_descriptions = MLPAdapter().to(device)
+
         self.classes = ['back', 'bottom', 'bottomleftback', 'bottomleftfront', 'bottomrightback', 'bottomrightfront', 'front', 
                         'left', 'right', 'top', 'topleftback', 'topleftfront', 'toprightback', 'toprightfront']
         self.questions = self._prepare_prompt()
@@ -66,7 +68,6 @@ class CLIPClassifier:
     def _prepare_prompt(self) -> List[str]:
         questions = [f"A remote control device observed from {CLASS_NAME} direction." for CLASS_NAME in self.classes]
         #questions.extend([f"A remote observed from {CLASS_NAME} direction." for CLASS_NAME in self.classes])
-        #questions.extend([f"A photo of remote taken from {CLASS_NAME} direction." for CLASS_NAME in self.classes])
         return questions
 
 if __name__ == '__main__':
@@ -75,17 +76,17 @@ if __name__ == '__main__':
 
     hparams = {
         'model_name': 'openai/clip-vit-base-patch16', # 'openai/clip-vit-large-patch14-336', 'openai/clip-vit-base-patch16'
-        'adapter_type': 'mamba', # 'mlp', 'transformer', 'mamba'
+        'adapter_type': 'mlp', # 'mlp', 'transformer', 'mamba'
         'save_path': 'ckpts/adapter.pth',
         'load_path': 'ckpts/adapter.pth',
         'device': torch.device("cuda"),
         'lr': 1e-3,
         'weight_decay': 1e-4,
-        'bs': 32,
+        'bs': 8,
         'image_dir': 'data/remote14',
     }
 
     classifier = CLIPClassifier(**hparams)
 
-    train_adapter(model_class=classifier, epochs=300, pureclip=False)
+    train_adapter(model_class=classifier, epochs=300)
     # test_adapter(model_class=classifier, split='val')
