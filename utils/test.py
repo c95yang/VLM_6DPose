@@ -15,7 +15,7 @@ def test_adapter(model_class, split: str = 'val') -> None:
         elif split == 'test':
             test_dataset = Remote14(root_dir=model_class.image_dir, is_test=True)
             dataloader = DataLoader(test_dataset, batch_size=model_class.bs, shuffle=False, pin_memory=True)
-        else:
+        elif split == 'train':
             train_dataset = Remote14(root_dir=model_class.image_dir, is_train=True)
             dataloader = DataLoader(train_dataset, batch_size=model_class.bs, shuffle=True, pin_memory=True)
             
@@ -51,7 +51,7 @@ def test_adapter(model_class, split: str = 'val') -> None:
             images = [topil(image) for image in images]
             descriptions = pipe(images, prompt=prompt, generate_kwargs={"max_new_tokens": 77})
             descriptions = [parse_output(description[0]["generated_text"]) for description in descriptions]
-            # print("descriptions: ", descriptions)
+            print(descriptions)
             descriptions_inputs = model_class.processor(text=descriptions, return_tensors="pt", padding=True, truncation=True, max_length=77).to(model_class.device)
             descriptions_embeds = model_class.model.get_text_features(**descriptions_inputs)
             descriptions_embeds = descriptions_embeds / descriptions_embeds.norm(dim=-1, keepdim=True)
@@ -82,7 +82,7 @@ def test_adapter(model_class, split: str = 'val') -> None:
             print(model_class.metrics)
             
             num_images = len(images) 
-            num_rows = 1
+            num_rows = 2
             num_cols = 8
 
             fig, axes = plt.subplots(nrows=num_rows, ncols=num_cols, figsize=(20, 20))  
@@ -91,7 +91,8 @@ def test_adapter(model_class, split: str = 'val') -> None:
                     ax.axis('off')
 
             for i in range(num_images):
-                img = images[i].cpu().numpy().transpose((1, 2, 0))
+                # img = images[i].cpu().numpy().transpose((1, 2, 0))
+                img = images[i]
 
                 pred_label = model_class.classes[predicted_classes[i]]
                 gt_label = model_class.classes[labels[i].cpu().item()]  
