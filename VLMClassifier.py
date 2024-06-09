@@ -11,7 +11,7 @@ from utils.train import train_adapter
 from utils.test import test_adapter
 from utils.classify import classify_zeroshot, classify_fewshotshot
 
-class CLIPClassifier:
+class VLMClassifier:
     def __init__(self, 
                  device: torch.device, 
                  bs: int, 
@@ -19,6 +19,8 @@ class CLIPClassifier:
                  adapter_type: str, 
                  load_path: str, 
                  save_path: str, 
+                 load_path_descriptions: str,
+                 save_path_descriptions: str,
                  lr, 
                  weight_decay,
                  image_dir,
@@ -30,9 +32,12 @@ class CLIPClassifier:
         self.adapter_type = adapter_type
         self.load_path = load_path
         self.save_path = save_path
+        self.load_path_descriptions = load_path_descriptions
+        self.save_path_descriptions = save_path_descriptions
         self.lr = lr
         self.weight_decay = weight_decay
         self.image_dir = image_dir
+        self.warmup_epochs=3
 
         self.writer = SummaryWriter()
 
@@ -40,11 +45,11 @@ class CLIPClassifier:
         self.processor = CLIPProcessor.from_pretrained(self.model_name)
 
         if self.adapter_type == 'mlp':
-            self.adapter = MLPAdapter().to(device)
+            self.adapter_image = MLPAdapter().to(device)
         elif self.adapter_type == 'transformer':
-            self.adapter = TransformerAdapter().to(device)
+            self.adapter_image = TransformerAdapter().to(device)
         elif self.adapter_type == 'mamba':
-            self.adapter = MambaAdapter().to(device)
+            self.adapter_image = MambaAdapter().to(device)
 
         self.adapter_descriptions = MLPAdapter().to(device)
 
@@ -53,12 +58,14 @@ class CLIPClassifier:
         self.questions = self._prepare_prompt()
         self.metrics = self._reset_metrics()
 
-        self.optimizer = optim.Adam(self.adapter.parameters(), lr=self.lr, weight_decay=self.weight_decay)
+        self.optimizer_image = optim.Adam(self.adapter_image.parameters(), lr=self.lr, weight_decay=self.weight_decay)
+        self.optimizer_descriptions = optim.Adam(self.adapter_descriptions.parameters(), lr=self.lr, weight_decay=self.weight_decay)
         self.criterion = nn.CrossEntropyLoss()
 
-        self.warmup_epochs=3
-        self.scheduler_cosine = torch.optim.lr_scheduler.CosineAnnealingLR(self.optimizer, T_max=3, eta_min=1e-6)
-        self.scheduler = GradualWarmupScheduler(self.optimizer, multiplier=1, total_epoch=self.warmup_epochs, after_scheduler=self.scheduler_cosine)
+        self.scheduler_cosine_image = torch.optim.lr_scheduler.CosineAnnealingLR(self.optimizer_image, T_max=3, eta_min=1e-6)
+        self.scheduler_image = GradualWarmupScheduler(self.optimizer_image, multiplier=1, total_epoch=self.warmup_epochs, after_scheduler=self.scheduler_cosine_image)
+        self.scheduler_cosine_descriptions = torch.optim.lr_scheduler.CosineAnnealingLR(self.optimizer_descriptions, T_max=3, eta_min=1e-6)
+        self.scheduler_descriptions = GradualWarmupScheduler(self.optimizer_descriptions, multiplier=1, total_epoch=self.warmup_epochs, after_scheduler=self.scheduler_cosine_descriptions)
         # self.scheduler = optim.lr_scheduler.StepLR(self.optimizer, step_size=20, gamma=0.5)
 
     def _reset_metrics(self) -> Dict[str, Dict[str, List[int]]]:
@@ -77,16 +84,18 @@ if __name__ == '__main__':
     hparams = {
         'model_name': 'openai/clip-vit-base-patch16', # 'openai/clip-vit-large-patch14-336', 'openai/clip-vit-base-patch16'
         'adapter_type': 'mlp', # 'mlp', 'transformer', 'mamba'
-        'save_path': 'ckpts/adapter.pth',
-        'load_path': 'ckpts/adapter.pth',
+        'save_path': 'ckpts/adapter_image.pth',
+        'load_path': 'ckpts/adapter_image.pth',
+        'save_path_descriptions': 'ckpts/adapter_descriptions.pth', 
+        'load_path_descriptions': 'ckpts/adapter_descriptions.pth',
         'device': torch.device("cuda"),
-        'lr': 1e-3,
+        'lr': 1e-4,
         'weight_decay': 1e-4,
-        'bs': 8,
+        'bs': 16,
         'image_dir': 'data/remote14',
     }
 
-    classifier = CLIPClassifier(**hparams)
+    classifier = VLMClassifier(**hparams)
 
     train_adapter(model_class=classifier, epochs=300)
     # test_adapter(model_class=classifier, split='val')
