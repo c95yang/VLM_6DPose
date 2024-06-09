@@ -16,7 +16,8 @@ class VLMClassifier:
                  device: torch.device, 
                  bs: int, 
                  model_name: str, 
-                 adapter_type: str, 
+                 adapter_image_type: str, 
+                 adapter_descriptions_type: str, 
                  load_path: str, 
                  save_path: str, 
                  load_path_descriptions: str,
@@ -29,7 +30,8 @@ class VLMClassifier:
         self.device = device
         self.bs = bs
         self.model_name = model_name
-        self.adapter_type = adapter_type
+        self.adapter_image_type = adapter_image_type
+        self.adapter_descriptions_type = adapter_descriptions_type
         self.load_path = load_path
         self.save_path = save_path
         self.load_path_descriptions = load_path_descriptions
@@ -44,14 +46,19 @@ class VLMClassifier:
         self.model = CLIPModel.from_pretrained(self.model_name).to(device)
         self.processor = CLIPProcessor.from_pretrained(self.model_name)
 
-        if self.adapter_type == 'mlp':
+        if self.adapter_image_type == 'mlp':
             self.adapter_image = MLPAdapter().to(device)
-        elif self.adapter_type == 'transformer':
+        elif self.adapter_image_type == 'transformer':
             self.adapter_image = TransformerAdapter().to(device)
-        elif self.adapter_type == 'mamba':
+        elif self.adapter_image_type == 'mamba':
             self.adapter_image = MambaAdapter().to(device)
 
-        self.adapter_descriptions = MLPAdapter().to(device)
+        if self.adapter_descriptions_type == 'mlp':
+            self.adapter_descriptions = MLPAdapter().to(device)
+        elif self.adapter_descriptions_type == 'transformer':
+            self.adapter_descriptions = TransformerAdapter().to(device)
+        elif self.adapter_descriptions_type == 'mamba':
+            self.adapter_descriptions = MambaAdapter().to(device)
 
         self.classes = ['back', 'bottom', 'bottomleftback', 'bottomleftfront', 'bottomrightback', 'bottomrightfront', 'front', 
                         'left', 'right', 'top', 'topleftback', 'topleftfront', 'toprightback', 'toprightfront']
@@ -83,10 +90,11 @@ if __name__ == '__main__':
 
     hparams = {
         'model_name': 'openai/clip-vit-base-patch16', # 'openai/clip-vit-large-patch14-336', 'openai/clip-vit-base-patch16'
-        'adapter_type': 'mlp', # 'mlp', 'transformer', 'mamba'
+        'adapter_image_type': 'mamba', # 'mlp', 'transformer', 'mamba'
+        'adapter_descriptions_type': 'mamba', # 'mlp', 'transformer', 'mamba'
         'save_path': 'ckpts/adapter_image.pth',
-        'load_path': 'ckpts/adapter_image.pth',
         'save_path_descriptions': 'ckpts/adapter_descriptions.pth', 
+        'load_path': 'ckpts/adapter_image.pth',
         'load_path_descriptions': 'ckpts/adapter_descriptions.pth',
         'device': torch.device("cuda"),
         'lr': 1e-4,
@@ -98,4 +106,4 @@ if __name__ == '__main__':
     classifier = VLMClassifier(**hparams)
 
     train_adapter(model_class=classifier, epochs=300)
-    # test_adapter(model_class=classifier, split='val')
+    # test_adapter(model_class=classifier, split='test')
