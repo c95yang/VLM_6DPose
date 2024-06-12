@@ -137,7 +137,7 @@ def train_adapter(model_class, epochs, accumulation_steps, train_descriptions, v
             best_val_loss = mean_val_loss
             torch.save(model_class.adapter_image.state_dict(), model_class.save_path)
             torch.save(model_class.adapter_descriptions.state_dict(), model_class.save_path_descriptions)
-            print(f"Model saved at epoch {epoch+1}, with validation loss: {mean_val_loss}, path: {model_class.save_path}, train_acc: {train_acc}, val_acc: {val_acc}")
+            print(f"Model saved at epoch {epoch+1}, with validation loss: {mean_val_loss}, path: {model_class.save_path, model_class.save_path_descriptions}, train_acc: {train_acc}, val_acc: {val_acc}")
 
         model_class.writer.add_scalars('Losses', {'Train': train_loss, 'Val': mean_val_loss}, epoch)
         model_class.metrics = model_class._reset_metrics()
