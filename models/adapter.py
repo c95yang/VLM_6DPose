@@ -1,21 +1,17 @@
 import torch.nn as nn
+import torch
 from mamba_ssm import Mamba
 
 class MLPAdapter(nn.Module):
-    def __init__(self, in_features=512, hidden_features=512, dropout=0.1):
+    def __init__(self, in_features, hidden_features, dtype, dropout=0.1):
         super().__init__()
 
         self.in_features = in_features
-        self.hidden_features = in_features
+        self.hidden_features = hidden_features
         self.dropout = dropout
+        torch.set_default_dtype(dtype)
 
         self.layers = nn.Sequential(
-
-            # nn.Dropout(self.dropout),
-            # nn.BatchNorm1d(self.in_features),
-            # nn.Linear(in_features=self.in_features, out_features=self.hidden_features),
-            # nn.GELU(),
-
             nn.BatchNorm1d(self.in_features),
             nn.Dropout(self.dropout),
             nn.Linear(in_features=self.in_features, out_features=self.hidden_features),
@@ -24,8 +20,14 @@ class MLPAdapter(nn.Module):
             nn.Dropout(self.dropout)
             )
         
-        for param in self.parameters():
-            param.requires_grad = True
+        self._initialize_weights()
+
+    def _initialize_weights(self):
+        for m in self.layers:
+            if isinstance(m, nn.Linear):
+                nn.init.kaiming_normal_(m.weight, mode='fan_out', nonlinearity='relu')
+                if m.bias is not None:
+                    nn.init.constant_(m.bias, 0)
 
     def forward(self, feat):
         img_feat = self.layers(feat)
@@ -33,13 +35,14 @@ class MLPAdapter(nn.Module):
 
 
 class TransformerAdapter(nn.Module):
-    def __init__(self, in_features=512, hidden_features=512, dropout=0.1):
+    def __init__(self, in_features, hidden_features, dtype, dropout=0.1):
         super().__init__()
         self.in_features = in_features
-        self.hidden_features = in_features
+        self.hidden_features = hidden_features
         self.nhead = 8
         self.dropout = dropout
         self.num_layers = 2
+        torch.set_default_dtype(dtype)
          
         self.input_projection = nn.Sequential(
             nn.BatchNorm1d(self.in_features),
@@ -68,13 +71,14 @@ class TransformerAdapter(nn.Module):
         return out    
 
 class MambaAdapter(nn.Module):
-    def __init__(self, in_features=512, hidden_features=512, dropout=0.2):
+    def __init__(self, in_features, hidden_features, dtype, dropout=0.2):
         super().__init__()
         self.in_features = in_features
         self.dropout = dropout
+        torch.set_default_dtype(dtype)
 
         self.mamba = nn.Sequential(
-            Mamba(d_model=512),
+            Mamba(d_model=in_features),
         )
 
         self.projection = nn.Sequential(

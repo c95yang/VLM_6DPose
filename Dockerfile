@@ -18,7 +18,8 @@ RUN python3 -m pip install --upgrade pip
 
 RUN python -m pip install \
     torch==1.13.1 \
-    torchvision==0.14.1
+    torchvision==0.14.1\
+    packaging
 
 RUN python -m pip install \
     transformers==4.27.4 \
@@ -28,5 +29,6 @@ RUN python -m pip install \
     torch-scatter==2.1.1 \
     ftfy==6.1.1 \
     h5py==3.8.0 \
-    matplotlib tensorboard\
+    matplotlib\
+    tensorboard\
     mamba-ssm
