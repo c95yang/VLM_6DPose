@@ -35,9 +35,6 @@ def train_adapter(model_class, epochs, accumulation_steps, train_descriptions, v
             ##############################################################################################################
 
             ########### llava descriptions embeds ########################################################################
-            # images = [topil(image) for image in images]
-            # descriptions = pipe(images, prompt=prompt, generate_kwargs={"max_new_tokens": 77})
-            # descriptions = [parse_output(description[0]["generated_text"]) for description in descriptions]
             with torch.no_grad():
                 descriptions_inputs = model_class.processor(text=descriptions, return_tensors="pt", padding=True, truncation=True, max_length=77).to(model_class.device)
                 descriptions_embeds = model_class.clip_model.get_text_features(**descriptions_inputs)
@@ -99,9 +96,6 @@ def train_adapter(model_class, epochs, accumulation_steps, train_descriptions, v
                 ##############################################################################################################
 
                 ########### llava descriptions embeds ########################################################################
-                # images = [topil(image) for image in images]
-                # descriptions = pipe(images, prompt=prompt, generate_kwargs={"max_new_tokens": 77})
-                # descriptions = [parse_output(description[0]["generated_text"]) for description in descriptions]
                 descriptions_inputs = model_class.processor(text=descriptions, return_tensors="pt", padding=True, truncation=True, max_length=77).to(model_class.device)
                 descriptions_embeds = model_class.clip_model.get_text_features(**descriptions_inputs)
                 descriptions_embeds = descriptions_embeds / descriptions_embeds.norm(dim=-1, keepdim=True)
