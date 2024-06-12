@@ -15,7 +15,7 @@ class VLMClassifier:
     def __init__(self, 
                  device: torch.device, 
                  bs: int, 
-                 model_name: str, 
+                 clip_model_name: str, 
                  adapter_image_type: str, 
                  adapter_descriptions_type: str, 
                  load_path: str, 
@@ -25,11 +25,13 @@ class VLMClassifier:
                  lr, 
                  weight_decay,
                  image_dir,
+                 llava_path,
+                 in_features: int = 512
                  ) -> None:
         
         self.device = device
         self.bs = bs
-        self.model_name = model_name
+        self.clip_model_name = clip_model_name
         self.adapter_image_type = adapter_image_type
         self.adapter_descriptions_type = adapter_descriptions_type
         self.load_path = load_path
@@ -40,25 +42,28 @@ class VLMClassifier:
         self.weight_decay = weight_decay
         self.image_dir = image_dir
         self.warmup_epochs=3
+        self.in_features = in_features
 
         self.writer = SummaryWriter()
 
-        self.model = CLIPModel.from_pretrained(self.model_name).to(device)
-        self.processor = CLIPProcessor.from_pretrained(self.model_name)
+        self.llava_path = llava_path
+
+        self.clip_model = CLIPModel.from_pretrained(self.clip_model_name).to(device)
+        self.processor = CLIPProcessor.from_pretrained(self.clip_model_name)
 
         if self.adapter_image_type == 'mlp':
-            self.adapter_image = MLPAdapter().to(device)
+            self.adapter_image = MLPAdapter(in_features=self.in_features).to(device)
         elif self.adapter_image_type == 'transformer':
-            self.adapter_image = TransformerAdapter().to(device)
+            self.adapter_image = TransformerAdapter(in_features=self.in_features).to(device)
         elif self.adapter_image_type == 'mamba':
-            self.adapter_image = MambaAdapter().to(device)
+            self.adapter_image = MambaAdapter(in_features=self.in_features).to(device)
 
         if self.adapter_descriptions_type == 'mlp':
-            self.adapter_descriptions = MLPAdapter().to(device)
+            self.adapter_descriptions = MLPAdapter(in_features=self.in_features).to(device)
         elif self.adapter_descriptions_type == 'transformer':
-            self.adapter_descriptions = TransformerAdapter().to(device)
+            self.adapter_descriptions = TransformerAdapter(in_features=self.in_features).to(device)
         elif self.adapter_descriptions_type == 'mamba':
-            self.adapter_descriptions = MambaAdapter().to(device)
+            self.adapter_descriptions = MambaAdapter(in_features=self.in_features).to(device)
 
         self.classes = ['back', 'bottom', 'bottomleftback', 'bottomleftfront', 'bottomrightback', 'bottomrightfront', 'front', 
                         'left', 'right', 'top', 'topleftback', 'topleftfront', 'toprightback', 'toprightfront']
@@ -91,19 +96,24 @@ if __name__ == '__main__':
     hparams = {
         'save_path': 'ckpts/adapter_image.pth',
         'save_path_descriptions': 'ckpts/adapter_descriptions.pth', 
-        'load_path': 'ckpts/adapter_image.pth',
-        'load_path_descriptions': 'ckpts/adapter_descriptions.pth',
+
+        'load_path': 'ckpts/adapter_image_mamba.pth',
+        'load_path_descriptions': 'ckpts/adapter_descriptions_mamba.pth',
+
         'device': torch.device("cuda"),
         'image_dir': 'data/remote14',
-        'model_name': 'openai/clip-vit-base-patch16', # 'openai/clip-vit-large-patch14-336', 'openai/clip-vit-base-patch16'
-        'adapter_image_type': 'mamba', # 'mlp', 'transformer', 'mamba'
-        'adapter_descriptions_type': 'mamba', # 'mlp', 'transformer', 'mamba'
+        'clip_model_name': 'openai/clip-vit-large-patch14-336', # 'openai/clip-vit-large-patch14-336', 'openai/clip-vit-base-patch16'
+        'llava_path': "llava-hf/llava-1.5-7b-hf",
+
+        'adapter_image_type': 'mlp', # 'mlp', 'transformer', 'mamba'
+        'adapter_descriptions_type': 'mlp', # 'mlp', 'transformer', 'mamba'
         'lr': 1e-5,
         'weight_decay': 1e-4,
-        'bs': 16,
+        'bs': 2, #16
+        'in_features': 768 #512 for clip base, 768 for clip large
     }
 
     classifier = VLMClassifier(**hparams)
 
     train_adapter(model_class=classifier, epochs=300)
-    # test_adapter(model_class=classifier, split='test')
+    # test_adapter(model_class=classifier, split='train')

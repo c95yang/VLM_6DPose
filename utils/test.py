@@ -5,6 +5,7 @@ from utils.datasets import Remote14
 from torch.utils.data import DataLoader
 from torchvision.transforms import ToPILImage
 from transformers import BitsAndBytesConfig, pipeline
+import textwrap
 
 from utils.misc import parse_output
 
@@ -23,14 +24,13 @@ def test_adapter(model_class, split: str = 'val') -> None:
         prompt = "USER: <image>\n" + question + "\nASSISTANT:"
 
         topil = ToPILImage()
-        llava_path = "llava-hf/llava-1.5-7b-hf"
         quantization_config = BitsAndBytesConfig(
             load_in_4bit=True,
             bnb_4bit_compute_dtype=torch.float16
         )
-        pipe = pipeline("image-to-text", model=llava_path, model_kwargs={"quantization_config": quantization_config})
+        pipe = pipeline("image-to-text", model=model_class.llava_path, model_kwargs={"quantization_config": quantization_config})
 
-        model_class.model.eval()
+        model_class.clip_model.eval()
 
         model_class.adapter_image.eval()
         model_class.adapter_image.load_state_dict(torch.load(model_class.load_path))
@@ -42,7 +42,7 @@ def test_adapter(model_class, split: str = 'val') -> None:
 
             ###################### images embeds ########################################################################
             inputs = model_class.processor(images=images, return_tensors="pt", do_rescale=False).to(model_class.device)
-            embeds = model_class.model.get_image_features(**inputs)
+            embeds = model_class.clip_model.get_image_features(**inputs)
             embeds = embeds / embeds.norm(p=2, dim=-1, keepdim=True)
             image_features = model_class.adapter_image(embeds)
             ##############################################################################################################
@@ -53,20 +53,24 @@ def test_adapter(model_class, split: str = 'val') -> None:
             descriptions = [parse_output(description[0]["generated_text"]) for description in descriptions]
             print(descriptions)
             descriptions_inputs = model_class.processor(text=descriptions, return_tensors="pt", padding=True, truncation=True, max_length=77).to(model_class.device)
-            descriptions_embeds = model_class.model.get_text_features(**descriptions_inputs)
+            descriptions_embeds = model_class.clip_model.get_text_features(**descriptions_inputs)
             descriptions_embeds = descriptions_embeds / descriptions_embeds.norm(dim=-1, keepdim=True)
             descriptions_features = model_class.adapter_descriptions(descriptions_embeds)
             ##############################################################################################################
 
             ###################### questions embeds ######################################################################
             text_inputs = model_class.processor(text=model_class.questions, return_tensors="pt", padding=True).to(model_class.device)
-            text_features = model_class.model.get_text_features(**text_inputs)
+            text_features = model_class.clip_model.get_text_features(**text_inputs)
             text_features = text_features / text_features.norm(dim=-1, keepdim=True)
             ##############################################################################################################
 
             ###################### Cosine Similarity fusion ##############################################################
-            cos_sim = torch.matmul(image_features, text_features.transpose(0, 1))
-            cos_sim += torch.matmul(descriptions_features, text_features.transpose(0, 1))
+            cos_sim_image = torch.matmul(image_features, text_features.transpose(0, 1))
+            print(f"cos_sim_image: {cos_sim_image}")
+            cos_sim_text= torch.matmul(descriptions_features, text_features.transpose(0, 1))
+            print(f"cos_sim_text: {cos_sim_text}")
+            cos_sim = cos_sim_image + cos_sim_text
+            print(f"cos_sim: {cos_sim}")
             predicted_classes = torch.argmax(cos_sim, dim=-1)
             ##############################################################################################################
             # print(cos_sim)     
@@ -103,6 +107,8 @@ def test_adapter(model_class, split: str = 'val') -> None:
                 ax.imshow(img)
                 ax.set_title(pred_label, fontsize=10, color="green" if pred_label == gt_label else "red", pad=1)
                 ax.text(0.5, -0.02, gt_label, transform=ax.transAxes, ha='center', va='top', fontsize=10, color="black")
+                wrapped_text = "\n".join(textwrap.wrap(descriptions[i], width=25))
+                ax.text(0.5, -0.2, wrapped_text, transform=ax.transAxes, ha='center', va='top', fontsize=10, color="black")
 
             plt.show()
 

@@ -6,7 +6,7 @@ class MLPAdapter(nn.Module):
         super().__init__()
 
         self.in_features = in_features
-        self.hidden_features = hidden_features
+        self.hidden_features = in_features
         self.dropout = dropout
 
         self.layers = nn.Sequential(
@@ -36,7 +36,7 @@ class TransformerAdapter(nn.Module):
     def __init__(self, in_features=512, hidden_features=512, dropout=0.1):
         super().__init__()
         self.in_features = in_features
-        self.hidden_features = hidden_features
+        self.hidden_features = in_features
         self.nhead = 8
         self.dropout = dropout
         self.num_layers = 2
