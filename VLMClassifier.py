@@ -102,21 +102,21 @@ if __name__ == '__main__':
         'save_path': 'ckpts/adapter_image.pth',
         'save_path_descriptions': 'ckpts/adapter_descriptions.pth', 
 
-        'load_path': 'ckpts/adapter_image_mamba.pth',
-        'load_path_descriptions': 'ckpts/adapter_descriptions_mamba.pth',
+        'load_path': 'ckpts/adapter_image.pth',
+        'load_path_descriptions': 'ckpts/adapter_descriptions.pth',
 
         'device': torch.device("cuda"),
-        'dtype': torch.float32,
+        'dtype': torch.float64,
         'image_dir': 'data/remote14',
-        'clip_model_name': 'openai/clip-vit-large-patch14-336', # 'openai/clip-vit-large-patch14-336', 'openai/clip-vit-base-patch16'
+        'clip_model_name': 'openai/clip-vit-base-patch16', # 'openai/clip-vit-large-patch14-336', 'openai/clip-vit-base-patch16'
+        'in_features': 512, #512 for clip base, 768 for clip large
         'llava_path': "llava-hf/llava-1.5-7b-hf",
 
         'adapter_image_type': 'mlp', # 'mlp', 'transformer', 'mamba'
         'adapter_descriptions_type': 'mlp', # 'mlp', 'transformer', 'mamba'
-        'lr': 1e-5,
+        'lr': 1e-2,
         'weight_decay': 1e-4,
-        'bs': 2, #16
-        'in_features': 768 #512 for clip base, 768 for clip large
+        'bs': 16, #16
     }
 
     classifier = VLMClassifier(**hparams)
@@ -124,7 +124,7 @@ if __name__ == '__main__':
     hparams = {
         'model_class': classifier, 
         'epochs': 300,
-        'accumulation_steps': 16,
+        'accumulation_steps': 1,
         'train_descriptions': "train_descriptions.json",
         'val_descriptions': "val_descriptions.json"
     }
