@@ -14,6 +14,7 @@ from utils.classify import classify_zeroshot, classify_fewshotshot
 class VLMClassifier:
     def __init__(self, 
                  device: torch.device, 
+                 dtype: torch.dtype,
                  bs: int, 
                  clip_model_name: str, 
                  adapter_image_type: str, 
@@ -22,14 +23,17 @@ class VLMClassifier:
                  save_path: str, 
                  load_path_descriptions: str,
                  save_path_descriptions: str,
-                 lr, 
-                 weight_decay,
-                 image_dir,
-                 llava_path,
-                 in_features: int = 512
+                 lr: float, 
+                 weight_decay: float,
+                 image_dir: str,
+                 llava_path: str,
+                 in_features: int
                  ) -> None:
         
         self.device = device
+        self.dtype = dtype
+        torch.set_default_dtype(self.dtype)
+
         self.bs = bs
         self.clip_model_name = clip_model_name
         self.adapter_image_type = adapter_image_type
@@ -43,6 +47,7 @@ class VLMClassifier:
         self.image_dir = image_dir
         self.warmup_epochs=3
         self.in_features = in_features
+        self.dtype = dtype
 
         self.writer = SummaryWriter()
 
@@ -52,18 +57,18 @@ class VLMClassifier:
         self.processor = CLIPProcessor.from_pretrained(self.clip_model_name)
 
         if self.adapter_image_type == 'mlp':
-            self.adapter_image = MLPAdapter(in_features=self.in_features).to(device)
+            self.adapter_image = MLPAdapter(in_features=self.in_features, hidden_features=self.in_features, dtype=self.dtype).to(device)
         elif self.adapter_image_type == 'transformer':
-            self.adapter_image = TransformerAdapter(in_features=self.in_features).to(device)
+            self.adapter_image = TransformerAdapter(in_features=self.in_features, hidden_features=self.in_features, dtype=self.dtype).to(device)
         elif self.adapter_image_type == 'mamba':
-            self.adapter_image = MambaAdapter(in_features=self.in_features).to(device)
+            self.adapter_image = MambaAdapter(in_features=self.in_features, dtype=self.dtype).to(device)
 
         if self.adapter_descriptions_type == 'mlp':
-            self.adapter_descriptions = MLPAdapter(in_features=self.in_features).to(device)
+            self.adapter_descriptions = MLPAdapter(in_features=self.in_features, hidden_features=self.in_features, dtype=self.dtype).to(device)
         elif self.adapter_descriptions_type == 'transformer':
-            self.adapter_descriptions = TransformerAdapter(in_features=self.in_features).to(device)
+            self.adapter_descriptions = TransformerAdapter(in_features=self.in_features, hidden_features=self.in_features, dtype=self.dtype).to(device)
         elif self.adapter_descriptions_type == 'mamba':
-            self.adapter_descriptions = MambaAdapter(in_features=self.in_features).to(device)
+            self.adapter_descriptions = MambaAdapter(in_features=self.in_features, dtype=self.dtype).to(device)
 
         self.classes = ['back', 'bottom', 'bottomleftback', 'bottomleftfront', 'bottomrightback', 'bottomrightfront', 'front', 
                         'left', 'right', 'top', 'topleftback', 'topleftfront', 'toprightback', 'toprightfront']
@@ -101,6 +106,7 @@ if __name__ == '__main__':
         'load_path_descriptions': 'ckpts/adapter_descriptions_mamba.pth',
 
         'device': torch.device("cuda"),
+        'dtype': torch.float32,
         'image_dir': 'data/remote14',
         'clip_model_name': 'openai/clip-vit-large-patch14-336', # 'openai/clip-vit-large-patch14-336', 'openai/clip-vit-base-patch16'
         'llava_path': "llava-hf/llava-1.5-7b-hf",
@@ -115,5 +121,13 @@ if __name__ == '__main__':
 
     classifier = VLMClassifier(**hparams)
 
-    train_adapter(model_class=classifier, epochs=300)
+    hparams = {
+        'model_class': classifier, 
+        'epochs': 300,
+        'accumulation_steps': 16,
+        'train_descriptions': "train_descriptions.json",
+        'val_descriptions': "val_descriptions.json"
+    }
+
+    train_adapter(**hparams)
     # test_adapter(model_class=classifier, split='train')
