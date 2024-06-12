@@ -129,5 +129,6 @@ if __name__ == '__main__':
         'val_descriptions': "val_descriptions.json"
     }
 
-    train_adapter(**hparams)
-    # test_adapter(model_class=classifier, split='train')
+    #train_adapter(**hparams)
+    
+    test_adapter(model_class=classifier, split='train', path="llava-hf/llava-1.5-7b-hf", plot=True)

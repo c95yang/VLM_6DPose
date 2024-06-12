@@ -46,20 +46,40 @@ from datasets import Remote14
 #     with open("val_descriptions.json", "w") as f:
 #         json.dump(val_descriptions, f)
 
-def generate_descriptions_pipe(image_paths, prompt, train_dataset, val_dataset, topil, path):
+def generate_descriptions_pipe(prompt, train_dataset, val_dataset, test_dataset, topil, path):
     quantization_config = BitsAndBytesConfig(
         load_in_4bit=True,
         bnb_4bit_compute_dtype=torch.float16
     )
     pipe = pipeline("image-to-text", model=path, model_kwargs={"quantization_config": quantization_config}) 
+
+    test_descriptions = {}
+    image_paths = test_dataset.get_all_image_paths()
+    
+    for image_path in tqdm(image_paths, desc="Generating test descriptions"):
+        image = test_dataset.load_image(image_path)  
+        image = topil(image)
+        #print(image)
+        description = pipe(image, prompt=prompt, generate_kwargs={"max_new_tokens": 77})
+        description_text = parse_output(description[0]["generated_text"]) 
+        test_descriptions[image_path] = description_text
+        print(description_text)
+
+    with open("test_descriptions.json", "w") as f:
+        json.dump(test_descriptions, f)
+
+
+    train_descriptions = {}
+    image_paths = train_dataset.get_all_image_paths()
     
     for image_path in tqdm(image_paths, desc="Generating train descriptions"):
         image = train_dataset.load_image(image_path)  
         image = topil(image)
+        #print(image)
         description = pipe(image, prompt=prompt, generate_kwargs={"max_new_tokens": 77})
         description_text = parse_output(description[0]["generated_text"]) 
         train_descriptions[image_path] = description_text
-        # print(description_text)
+        #print(description_text)
 
     with open("train_descriptions.json", "w") as f:
         json.dump(train_descriptions, f)
@@ -87,11 +107,9 @@ if __name__ == '__main__':
     image_dir = 'data/remote14'
     train_dataset = Remote14(root_dir=image_dir, is_train=True)
     val_dataset = Remote14(root_dir=image_dir, is_val=True)
+    test_dataset = Remote14(root_dir=image_dir, is_test=True)
 
-    train_descriptions = {}
-    image_paths = train_dataset.get_all_image_paths()
-
-    generate_descriptions_pipe(image_paths, prompt, train_dataset, val_dataset, topil, 
+    generate_descriptions_pipe(prompt, train_dataset, val_dataset, test_dataset, topil, 
                              "llava-hf/llava-1.5-7b-hf") #"llava-hf/bakLlava-v1-hf","llava-hf/llava-1.5-7b-hf"
 
     #generate_descriptions(image_paths, prompt, train_dataset, val_dataset, topil)
