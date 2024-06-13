@@ -8,7 +8,7 @@ from warmup_scheduler import GradualWarmupScheduler
 
 from models.adapter import MLPAdapter, TransformerAdapter, MambaAdapter
 from utils.train import train_adapter
-from utils.test import test_adapter
+from utils.test import test_adapter, inference_single_image
 from utils.classify import classify_zeroshot, classify_fewshotshot
 
 class VLMClassifier:
@@ -112,8 +112,8 @@ if __name__ == '__main__':
         'in_features': 512, #512 for clip base, 768 for clip large
         'llava_path': "llava-hf/llava-1.5-7b-hf",
 
-        'adapter_image_type': 'mlp', # 'mlp', 'transformer', 'mamba'
-        'adapter_descriptions_type': 'mlp', # 'mlp', 'transformer', 'mamba'
+        'adapter_image_type': 'transformer', # 'mlp', 'transformer', 'mamba'
+        'adapter_descriptions_type': 'transformer', # 'mlp', 'transformer', 'mamba'
         'lr': 1e-2,
         'weight_decay': 1e-4,
         'bs': 16, #16
@@ -125,10 +125,11 @@ if __name__ == '__main__':
         'model_class': classifier, 
         'epochs': 300,
         'accumulation_steps': 1,
-        'train_descriptions': "train_descriptions.json",
-        'val_descriptions': "val_descriptions.json"
+        'train_descriptions': "train_descriptions_concise.json",
+        'val_descriptions': "val_descriptions_concise.json"
     }
-
-    #train_adapter(**hparams)
+    train_adapter(**hparams)
     
-    test_adapter(model_class=classifier, split='train', path="llava-hf/llava-1.5-7b-hf", plot=True)
+    #test_adapter(model_class=classifier, split='val', plot=True)
+    #inference_single_image(model_class=classifier, image_path='data/remote14/train/remote-comfee/BottomRightBack.png', plot=False)
+

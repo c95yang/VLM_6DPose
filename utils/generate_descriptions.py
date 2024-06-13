@@ -11,6 +11,7 @@ current_dir = os.path.dirname(os.path.abspath(__file__))
 parent_dir = os.path.abspath(os.path.join(current_dir, os.pardir))
 sys.path.append(parent_dir)
 from datasets import Remote14
+from PIL import Image 
 
 # from transformers import AutoModelForCausalLM, AutoTokenizer, AutoProcessor, AutoModelForPreTraining
 
@@ -49,9 +50,18 @@ from datasets import Remote14
 def generate_descriptions_pipe(prompt, train_dataset, val_dataset, test_dataset, topil, path):
     quantization_config = BitsAndBytesConfig(
         load_in_4bit=True,
-        bnb_4bit_compute_dtype=torch.float16
+        bnb_4bit_compute_dtype=torch.float16,
+        low_cpu_mem_usage=True
     )
     pipe = pipeline("image-to-text", model=path, model_kwargs={"quantization_config": quantization_config}) 
+
+    with torch.no_grad(): 
+        img = Image.open('data/remote14/test/13/TopRightBack.png')
+        description = pipe(img, prompt=prompt, generate_kwargs={"max_new_tokens": 77})
+        # print(pipe.model)
+        description = parse_output(description[0]["generated_text"]) 
+        print(description)
+        return
 
     test_descriptions = {}
     image_paths = test_dataset.get_all_image_paths()
@@ -59,15 +69,13 @@ def generate_descriptions_pipe(prompt, train_dataset, val_dataset, test_dataset,
     for image_path in tqdm(image_paths, desc="Generating test descriptions"):
         image = test_dataset.load_image(image_path)  
         image = topil(image)
-        #print(image)
         description = pipe(image, prompt=prompt, generate_kwargs={"max_new_tokens": 77})
         description_text = parse_output(description[0]["generated_text"]) 
         test_descriptions[image_path] = description_text
-        print(description_text)
+        #print(description_text)
 
     with open("test_descriptions.json", "w") as f:
         json.dump(test_descriptions, f)
-
 
     train_descriptions = {}
     image_paths = train_dataset.get_all_image_paths()
@@ -75,7 +83,6 @@ def generate_descriptions_pipe(prompt, train_dataset, val_dataset, test_dataset,
     for image_path in tqdm(image_paths, desc="Generating train descriptions"):
         image = train_dataset.load_image(image_path)  
         image = topil(image)
-        #print(image)
         description = pipe(image, prompt=prompt, generate_kwargs={"max_new_tokens": 77})
         description_text = parse_output(description[0]["generated_text"]) 
         train_descriptions[image_path] = description_text
@@ -111,5 +118,3 @@ if __name__ == '__main__':
 
     generate_descriptions_pipe(prompt, train_dataset, val_dataset, test_dataset, topil, 
                              "llava-hf/llava-1.5-7b-hf") #"llava-hf/bakLlava-v1-hf","llava-hf/llava-1.5-7b-hf"
-
-    #generate_descriptions(image_paths, prompt, train_dataset, val_dataset, topil)
