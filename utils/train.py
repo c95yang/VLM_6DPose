@@ -3,7 +3,7 @@ from tqdm import tqdm
 from utils.datasets import Remote14
 from torch.utils.data import DataLoader
 
-def train_adapter(model_class, epochs, accumulation_steps, train_descriptions, val_descriptions) -> None:
+def train_adapter(model_class, epochs, train_descriptions, val_descriptions, fusion) -> None:
     train_dataset = Remote14(root_dir=model_class.image_dir, is_train=True, descriptions_file=train_descriptions)
     train_loader = DataLoader(train_dataset, batch_size=model_class.bs, shuffle=True, pin_memory=True)
     
@@ -50,9 +50,9 @@ def train_adapter(model_class, epochs, accumulation_steps, train_descriptions, v
             ##############################################################################################################
 
             ###################### Cosine Similarity fusion ##############################################################
-            cos_sim_image = torch.matmul(image_features, text_features.transpose(0, 1))
-            cos_sim_text= torch.matmul(descriptions_features, text_features.transpose(0, 1))
-            cos_sim = cos_sim_image + cos_sim_text
+            cos_sim = torch.matmul(image_features, text_features.transpose(0, 1))
+            if fusion:
+                cos_sim += torch.matmul(descriptions_features, text_features.transpose(0, 1))
             predicted_classes = torch.argmax(cos_sim, dim=-1)
             ##############################################################################################################
 
@@ -61,15 +61,14 @@ def train_adapter(model_class, epochs, accumulation_steps, train_descriptions, v
             train_loss = loss.item()
             loss.backward()
 
-            if (epoch + 1) % accumulation_steps == 0:  # Wait for several mini-batches
-                model_class.optimizer_image.step()
-                model_class.optimizer_descriptions.step()
+            model_class.optimizer_image.step()
+            model_class.optimizer_descriptions.step()
 
-                model_class.scheduler_image.step()
-                model_class.scheduler_descriptions.step()
+            model_class.scheduler_image.step()
+            model_class.scheduler_descriptions.step()
 
-                model_class.optimizer_image.zero_grad()
-                model_class.optimizer_descriptions.zero_grad()
+            model_class.optimizer_image.zero_grad()
+            model_class.optimizer_descriptions.zero_grad()
 
             # print(f"Lr image adapter: {model_class.optimizer_image.param_groups[0]['lr']}")
             # print(f"Lr descriptions adapter: {model_class.optimizer_descriptions.param_groups[0]['lr']}")
@@ -110,7 +109,8 @@ def train_adapter(model_class, epochs, accumulation_steps, train_descriptions, v
 
                 ###################### Cosine Similarity fusion ##############################################################
                 cos_sim = torch.matmul(image_features, text_features.transpose(0, 1))
-                cos_sim += torch.matmul(descriptions_features, text_features.transpose(0, 1))
+                if fusion:
+                    cos_sim += torch.matmul(descriptions_features, text_features.transpose(0, 1))
                 predicted_classes = torch.argmax(cos_sim, dim=-1)
                 ##############################################################################################################
 
