@@ -71,7 +71,7 @@ class TransformerAdapter(nn.Module):
         return out    
 
 class MambaAdapter(nn.Module):
-    def __init__(self, in_features, hidden_features, dtype, dropout=0.2):
+    def __init__(self, in_features, dtype, dropout=0.2):
         super().__init__()
         self.in_features = in_features
         self.dropout = dropout

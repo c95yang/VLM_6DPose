@@ -1,5 +1,5 @@
 import os
-from PIL import Image as Image
+from PIL import Image 
 from torchvision.transforms import functional as F
 from torch.utils.data import Dataset
 import json
