@@ -4,9 +4,9 @@ from transformers import CLIPProcessor, CLIPModel
 import torch.nn as nn
 import torch.optim as optim
 from torch.utils.tensorboard import SummaryWriter
-from warmup_scheduler import GradualWarmupScheduler
+#from warmup_scheduler import GradualWarmupScheduler
 
-from models.adapter import MLPAdapter, TransformerAdapter, MambaAdapter
+from models.adapter import MLPAdapter, TransformerAdapter#, MambaAdapter
 from utils.train import train_adapter
 from utils.test import test_adapter, inference_single_image
 from utils.classify import classify_zeroshot, classify_fewshotshot
@@ -60,15 +60,15 @@ class VLMClassifier:
             self.adapter_image = MLPAdapter(in_features=self.in_features, hidden_features=self.in_features, dtype=self.dtype).to(device)
         elif self.adapter_image_type == 'transformer':
             self.adapter_image = TransformerAdapter(in_features=self.in_features, hidden_features=self.in_features, dtype=self.dtype).to(device)
-        elif self.adapter_image_type == 'mamba':
-            self.adapter_image = MambaAdapter(in_features=self.in_features, dtype=self.dtype).to(device)
+        # elif self.adapter_image_type == 'mamba':
+        #     self.adapter_image = MambaAdapter(in_features=self.in_features, dtype=self.dtype).to(device)
 
         if self.adapter_descriptions_type == 'mlp':
             self.adapter_descriptions = MLPAdapter(in_features=self.in_features, hidden_features=self.in_features, dtype=self.dtype).to(device)
         elif self.adapter_descriptions_type == 'transformer':
             self.adapter_descriptions = TransformerAdapter(in_features=self.in_features, hidden_features=self.in_features, dtype=self.dtype).to(device)
-        elif self.adapter_descriptions_type == 'mamba':
-            self.adapter_descriptions = MambaAdapter(in_features=self.in_features, dtype=self.dtype).to(device)
+        # elif self.adapter_descriptions_type == 'mamba':
+        #     self.adapter_descriptions = MambaAdapter(in_features=self.in_features, dtype=self.dtype).to(device)
 
         self.classes = ['back', 'bottom', 'bottomleftback', 'bottomleftfront', 'bottomrightback', 'bottomrightfront', 'front', 
                         'left', 'right', 'top', 'topleftback', 'topleftfront', 'toprightback', 'toprightfront']
@@ -79,11 +79,13 @@ class VLMClassifier:
         self.optimizer_descriptions = optim.Adam(self.adapter_descriptions.parameters(), lr=self.lr, weight_decay=self.weight_decay)
         self.criterion = nn.CrossEntropyLoss()
 
-        self.scheduler_cosine_image = torch.optim.lr_scheduler.CosineAnnealingLR(self.optimizer_image, T_max=3, eta_min=1e-6)
-        self.scheduler_image = GradualWarmupScheduler(self.optimizer_image, multiplier=1, total_epoch=self.warmup_epochs, after_scheduler=self.scheduler_cosine_image)
-        self.scheduler_cosine_descriptions = torch.optim.lr_scheduler.CosineAnnealingLR(self.optimizer_descriptions, T_max=3, eta_min=1e-6)
-        self.scheduler_descriptions = GradualWarmupScheduler(self.optimizer_descriptions, multiplier=1, total_epoch=self.warmup_epochs, after_scheduler=self.scheduler_cosine_descriptions)
-        # self.scheduler = optim.lr_scheduler.StepLR(self.optimizer, step_size=20, gamma=0.5)
+        # self.scheduler_cosine_image = torch.optim.lr_scheduler.CosineAnnealingLR(self.optimizer_image, T_max=3, eta_min=1e-6)
+        # self.scheduler_image = GradualWarmupScheduler(self.optimizer_image, multiplier=1, total_epoch=self.warmup_epochs, after_scheduler=self.scheduler_cosine_image)
+        # self.scheduler_cosine_descriptions = torch.optim.lr_scheduler.CosineAnnealingLR(self.optimizer_descriptions, T_max=3, eta_min=1e-6)
+        # self.scheduler_descriptions = GradualWarmupScheduler(self.optimizer_descriptions, multiplier=1, total_epoch=self.warmup_epochs, after_scheduler=self.scheduler_cosine_descriptions)
+
+        self.scheduler_image = torch.optim.lr_scheduler.CosineAnnealingLR(self.optimizer_image, T_max=3, eta_min=1e-6)
+        self.scheduler_descriptions = torch.optim.lr_scheduler.CosineAnnealingLR(self.optimizer_descriptions, T_max=3, eta_min=1e-6)
 
     def _reset_metrics(self) -> Dict[str, Dict[str, List[int]]]:
         self.metrics = {'train': {'gts': [], 'preds': []}, 'val': {'gts': [], 'preds': []}, 'test': {'gts': [], 'preds': []}}
@@ -95,8 +97,6 @@ class VLMClassifier:
         return questions
 
 if __name__ == '__main__':
-    # classify_zeroshot(model_class=classifier, split='train' )
-    # classify_fewshotshot(model_class=classifier, split='train')
 
     hparams = {
         'save_path': 'ckpts/adapter_image.pth',
@@ -112,8 +112,8 @@ if __name__ == '__main__':
         'in_features': 512, #512 for clip base, 768 for clip large
         'llava_path': "llava-hf/llava-1.5-7b-hf",
 
-        'adapter_image_type': 'transformer', # 'mlp', 'transformer', 'mamba'
-        'adapter_descriptions_type': 'transformer', # 'mlp', 'transformer', 'mamba'
+        'adapter_image_type': 'mlp', # 'mlp', 'transformer', 'mamba'
+        'adapter_descriptions_type': 'mlp', # 'mlp', 'transformer', 'mamba'
         'lr': 1e-2,
         'weight_decay': 1e-4,
         'bs': 16, #16
@@ -123,13 +123,13 @@ if __name__ == '__main__':
 
     hparams = {
         'model_class': classifier, 
-        'epochs': 300,
-        'accumulation_steps': 1,
+        'epochs': 50,
         'train_descriptions': "train_descriptions_concise.json",
-        'val_descriptions': "val_descriptions_concise.json"
+        'val_descriptions': "val_descriptions_concise.json",
+        'fusion': True,
     }
     train_adapter(**hparams)
     
-    #test_adapter(model_class=classifier, split='val', plot=True)
-    #inference_single_image(model_class=classifier, image_path='data/remote14/train/remote-comfee/BottomRightBack.png', plot=False)
+    # test_adapter(model_class=classifier, split='val', plot=True)
+    # inference_single_image(model_class=classifier, image_path='data/remote14/train/remote-comfee/BottomRightBack.png', plot=False)
 

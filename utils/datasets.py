@@ -3,6 +3,8 @@ from PIL import Image
 from torchvision.transforms import functional as F
 from torch.utils.data import Dataset
 import json
+from torchvision import transforms
+from matplotlib import pyplot as plt
 
 class Remote14(Dataset):
     def __init__(self, root_dir, descriptions_file=None, is_test=False, is_val=False, is_train=False):
@@ -11,6 +13,7 @@ class Remote14(Dataset):
         self.is_train = is_train
         self.root_dir = root_dir
         self.image_paths = []
+        self.desired_size = (800, 800)
 
         self.descriptions_file = descriptions_file
         if self.descriptions_file is not None:
@@ -23,8 +26,19 @@ class Remote14(Dataset):
         self.load_images_and_labels()
         self.class_to_idx = {cls: idx for idx, cls in enumerate(self.classes)}
         # print(self.class_to_idx)
-        self.desired_size = (800, 800)
-    
+
+        self.transform = transforms.Compose([
+            transforms.RandomApply([
+                transforms.ColorJitter(brightness=0.2, contrast=0.2, saturation=0.2, hue=0.2),
+            ], p=0.5),  
+
+            transforms.RandomApply([
+                transforms.RandomResizedCrop(size=self.desired_size, scale=(0.8, 1.0), ratio=(0.9, 1.1), interpolation=transforms.InterpolationMode.BILINEAR),
+            ], p=0.2), 
+
+            transforms.Resize(self.desired_size), 
+        ])
+
     def load_images_and_labels(self): 
         if self.is_val:
             path = os.path.join(self.root_dir, 'val')
@@ -42,30 +56,13 @@ class Remote14(Dataset):
                     label = os.path.splitext(file)[0].lower()
 
                     img = Image.open(img_path)
-                    if  path == os.path.join(self.root_dir, 'test') and img.size != (800, 800):
-                        img = img.resize((800, 800), Image.ANTIALIAS)
+                    if  path == os.path.join(self.root_dir, 'test') and img.size != self.desired_size:
+                        img = img.resize(self.desired_size, Image.ANTIALIAS)
                         img.save(img_path)
                     img.close()
 
                     self.image_paths.append(img_path)
                     self.labels.append(label)
-
-                    # if path == os.path.join(self.root_dir, 'test'):
-                    #     if label == 'top' or label == 'bottom':
-                    #         base_name = os.path.splitext(file)[0]
-                    #         ext = os.path.splitext(file)[1]
-
-                    #         image = Image.open(img_path)
-                    #         for angle in [45, 90, 135, 180, 225, 270, 315]:
-                    #             # rotated_image = image.rotate(angle, fillcolor=(187, 187, 187))
-                    #             rotated_image = image.rotate(angle, fillcolor=(255, 255, 255))
-                    #             rotated_file = f"{base_name}_rot{angle}{ext}"
-                    #             rotated_path = os.path.join(subdir, rotated_file)
-                    #             rotated_image.save(rotated_path)
-                    #             print(rotated_path)
-
-                    #             self.image_paths.append(rotated_path)
-                    #             self.labels.append(label)
 
     def load_descriptions(self, descriptions_file):
         with open(descriptions_file, "r") as f:
@@ -83,12 +80,18 @@ class Remote14(Dataset):
             label = label.split('_rot')[0]
 
         image = Image.open(img_path).convert("RGB")
-        image = F.to_tensor(image) 
+        image = self.transform(image)
+        # plt.imshow(image)
+        # plt.show()
+        image = transforms.ToTensor()(image)
+
         label_idx = self.class_to_idx[label]
+
         if self.descriptions_file is not None:
             description = self.descriptions[img_path]
             return image, label_idx, description
-        return image, label_idx
+        else:
+            return image, label_idx
 
 
     def get_class_labels(self):
@@ -99,5 +102,6 @@ class Remote14(Dataset):
     
     def load_image(self, img_path):
         image = Image.open(img_path).convert("RGB")
-        image = F.to_tensor(image)
+        image = self.transform(image)
+        image = transforms.ToTensor()(image)
         return image

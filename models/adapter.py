@@ -1,6 +1,6 @@
 import torch.nn as nn
 import torch
-from mamba_ssm import Mamba
+#from mamba_ssm import Mamba
 
 class MLPAdapter(nn.Module):
     def __init__(self, in_features, hidden_features, dtype, dropout=0.1):
@@ -70,39 +70,39 @@ class TransformerAdapter(nn.Module):
         out = self.output_projection(out)
         return out    
 
-class MambaAdapter(nn.Module):
-    def __init__(self, in_features, dtype, dropout=0.2):
-        super().__init__()
-        self.in_features = in_features
-        self.dropout = dropout
-        torch.set_default_dtype(dtype)
+# class MambaAdapter(nn.Module):
+#     def __init__(self, in_features, dtype, dropout=0.2):
+#         super().__init__()
+#         self.in_features = in_features
+#         self.dropout = dropout
+#         torch.set_default_dtype(dtype)
 
-        self.mamba = nn.Sequential(
-            Mamba(d_model=in_features),
-        )
+#         self.mamba = nn.Sequential(
+#             Mamba(d_model=in_features),
+#         )
 
-        self.projection = nn.Sequential(
-            nn.BatchNorm1d(self.in_features),
-            nn.Dropout(self.dropout),
-            # nn.Linear(in_features=self.in_features, out_features=self.in_features),
-            # nn.GELU(),
-        )
+#         self.projection = nn.Sequential(
+#             nn.BatchNorm1d(self.in_features),
+#             nn.Dropout(self.dropout),
+#             # nn.Linear(in_features=self.in_features, out_features=self.in_features),
+#             # nn.GELU(),
+#         )
 
-        for param in self.parameters():
-            param.requires_grad = True
+#         for param in self.parameters():
+#             param.requires_grad = True
 
-    def forward(self, feat):
-        out = self.projection(feat)
+#     def forward(self, feat):
+#         out = self.projection(feat)
 
-        out = out.unsqueeze(1)
-        out = self.mamba(out)
-        out = out.squeeze(1)
+#         out = out.unsqueeze(1)
+#         out = self.mamba(out)
+#         out = out.squeeze(1)
 
-        # out = self.projection(out)
+#         # out = self.projection(out)
 
-        # out = out.unsqueeze(1)
-        # out = self.mamba(out)
-        # out = out.squeeze(1)
+#         # out = out.unsqueeze(1)
+#         # out = self.mamba(out)
+#         # out = out.squeeze(1)
 
-        out = self.projection(out)
-        return out
+#         out = self.projection(out)
+#         return out
