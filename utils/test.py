@@ -10,7 +10,7 @@ from transformers import BitsAndBytesConfig, pipeline
 import textwrap
 from torchvision.transforms import functional as F
 
-from utils.misc import parse_output
+from utils.misc import parse_output,calculate_mean_std
 from PIL import Image 
 import numpy as np    
 
@@ -25,9 +25,12 @@ def test_adapter(model_class, split, plot) -> None:
     if split == 'train':
         train_dataset = Remote14(root_dir=model_class.image_dir, is_train=True, descriptions_file="train_descriptions_concise.json")
         dataloader = DataLoader(train_dataset, batch_size=model_class.bs, shuffle=True, pin_memory=True)
+        # calculate_mean_std(dataloader)
+        # return
     elif split == 'val':
         val_dataset = Remote14(root_dir=model_class.image_dir, is_val=True, descriptions_file="val_descriptions_concise.json")
         dataloader = DataLoader(val_dataset, batch_size=model_class.bs, shuffle=False, pin_memory=True)
+        
     elif split == 'test':
         test_dataset = Remote14(root_dir=model_class.image_dir, is_test=True, descriptions_file="test_descriptions_concise.json")
         dataloader = DataLoader(test_dataset, batch_size=model_class.bs, shuffle=False, pin_memory=True)
@@ -228,7 +231,7 @@ def inference_single_image(model_class, image_path, plot) -> None:
     # question = "describe the image in the image."
     prompt = "USER: <image>\n" + question + "\nASSISTANT:"
 
-    torch.set_default_dtype(torch.float16)
+    # torch.set_default_dtype(torch.float16)
 
     quantization_config = BitsAndBytesConfig(
         load_in_4bit=True,
@@ -236,6 +239,10 @@ def inference_single_image(model_class, image_path, plot) -> None:
         low_cpu_mem_usage=True
     )
     pipe = pipeline("image-to-text", model=model_class.llava_path, model_kwargs={"quantization_config": quantization_config}) 
+
+    m = pipe.model
+    for name, param in m.named_parameters():
+        print(f"Pipeline Model Parameter: {name}, Dtype: {param.dtype}")
 
     with torch.no_grad():
         img = Image.open('data/remote14/test/13/TopRightBack.png')

@@ -95,6 +95,14 @@ class VLMClassifier:
         questions = [f"A remote control device observed from {CLASS_NAME} direction." for CLASS_NAME in self.classes]
         #questions.extend([f"A remote observed from {CLASS_NAME} direction." for CLASS_NAME in self.classes])
         return questions
+    
+    def get_all_parameters(self):
+        for attr_name in dir(self):
+            attr = getattr(self, attr_name)
+            if isinstance(attr, nn.Module):
+                for name, param in attr.named_parameters():
+                    print(f"Model: {attr_name}, Parameter: {name}, Dtype: {param.dtype}")
+
 
 if __name__ == '__main__':
 
@@ -108,8 +116,8 @@ if __name__ == '__main__':
         'device': torch.device("cuda"),
         'dtype': torch.float64,
         'image_dir': 'data/remote14',
-        'clip_model_name': 'openai/clip-vit-base-patch16', # 'openai/clip-vit-large-patch14-336', 'openai/clip-vit-base-patch16'
-        'in_features': 512, #512 for clip base, 768 for clip large
+        'clip_model_name': 'openai/clip-vit-large-patch14-336', # 'openai/clip-vit-large-patch14-336', 'openai/clip-vit-base-patch16'
+        'in_features': 768, #512 for clip base, 768 for clip large
         'llava_path': "llava-hf/llava-1.5-7b-hf",
 
         'adapter_image_type': 'mlp', # 'mlp', 'transformer', 'mamba'
@@ -120,16 +128,17 @@ if __name__ == '__main__':
     }
 
     classifier = VLMClassifier(**hparams)
+    # classifier.get_all_parameters()
 
     hparams = {
         'model_class': classifier, 
         'epochs': 50,
         'train_descriptions': "train_descriptions_concise.json",
         'val_descriptions': "val_descriptions_concise.json",
-        'fusion': True,
+        'fusion': False,
     }
     train_adapter(**hparams)
     
-    # test_adapter(model_class=classifier, split='val', plot=True)
-    # inference_single_image(model_class=classifier, image_path='data/remote14/train/remote-comfee/BottomRightBack.png', plot=False)
+    # test_adapter(model_class=classifier, split='test', plot=True)
+    # inference_single_image(model_class=classifier, image_path='data/remote14/train/remote-comfee/BottomRightBack.png', plot=True)
 
