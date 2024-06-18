@@ -34,13 +34,14 @@ def train_adapter(model_class, epochs, train_descriptions, val_descriptions, fus
             image_features = model_class.adapter_image(embeds)
             ##############################################################################################################
 
-            ########### llava descriptions embeds ########################################################################
-            with torch.no_grad():
-                descriptions_inputs = model_class.processor(text=descriptions, return_tensors="pt", padding=True, truncation=True, max_length=77).to(model_class.device)
-                descriptions_embeds = model_class.clip_model.get_text_features(**descriptions_inputs)
-                descriptions_embeds = descriptions_embeds / descriptions_embeds.norm(dim=-1, keepdim=True)
-            descriptions_features = model_class.adapter_descriptions(descriptions_embeds)
-            ##############################################################################################################
+            if fusion:
+                ########### llava descriptions embeds ########################################################################
+                with torch.no_grad():
+                    descriptions_inputs = model_class.processor(text=descriptions, return_tensors="pt", padding=True, truncation=True, max_length=77).to(model_class.device)
+                    descriptions_embeds = model_class.clip_model.get_text_features(**descriptions_inputs)
+                    descriptions_embeds = descriptions_embeds / descriptions_embeds.norm(dim=-1, keepdim=True)
+                descriptions_features = model_class.adapter_descriptions(descriptions_embeds)
+                ##############################################################################################################
 
             ###################### questions embeds ######################################################################
             with torch.no_grad():
@@ -93,13 +94,14 @@ def train_adapter(model_class, epochs, train_descriptions, val_descriptions, fus
                 embeds = embeds / embeds.norm(p=2, dim=-1, keepdim=True)
                 image_features = model_class.adapter_image(embeds)
                 ##############################################################################################################
-
-                ########### llava descriptions embeds ########################################################################
-                descriptions_inputs = model_class.processor(text=descriptions, return_tensors="pt", padding=True, truncation=True, max_length=77).to(model_class.device)
-                descriptions_embeds = model_class.clip_model.get_text_features(**descriptions_inputs)
-                descriptions_embeds = descriptions_embeds / descriptions_embeds.norm(dim=-1, keepdim=True)
-                descriptions_features = model_class.adapter_descriptions(descriptions_embeds)
-                ##############################################################################################################
+                
+                if fusion:
+                    ########### llava descriptions embeds ########################################################################
+                    descriptions_inputs = model_class.processor(text=descriptions, return_tensors="pt", padding=True, truncation=True, max_length=77).to(model_class.device)
+                    descriptions_embeds = model_class.clip_model.get_text_features(**descriptions_inputs)
+                    descriptions_embeds = descriptions_embeds / descriptions_embeds.norm(dim=-1, keepdim=True)
+                    descriptions_features = model_class.adapter_descriptions(descriptions_embeds)
+                    ##############################################################################################################
 
                 ###################### questions embeds ######################################################################
                 text_inputs = model_class.processor(text=model_class.questions, return_tensors="pt", padding=True).to(model_class.device)

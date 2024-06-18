@@ -55,13 +55,14 @@ def generate_descriptions_pipe(prompt, train_dataset, val_dataset, test_dataset,
     )
     pipe = pipeline("image-to-text", model=path, model_kwargs={"quantization_config": quantization_config}) 
 
-    # with torch.no_grad(): 
-    #     img = Image.open('data/remote14/test/13/TopRightBack.png')
-    #     description = pipe(img, prompt=prompt, generate_kwargs={"max_new_tokens": 77})
-    #     # print(pipe.model)
-    #     description = parse_output(description[0]["generated_text"]) 
-    #     print(description)
-    #     return
+    # Test the pipeline
+    with torch.no_grad(): 
+        img = Image.open('data/remote14/train/remote-comfee/TopRightBack.png')
+        description = pipe(img, prompt=prompt, generate_kwargs={"max_new_tokens": 77})
+        # print(pipe.model)
+        description = parse_output(description[0]["generated_text"]) 
+        print(description)
+        return
 
     test_descriptions = {}
     image_paths = test_dataset.get_all_image_paths()
@@ -104,9 +105,14 @@ def generate_descriptions_pipe(prompt, train_dataset, val_dataset, test_dataset,
     with open("val_descriptions.json", "w") as f:
         json.dump(val_descriptions, f)
 
+
 if __name__ == '__main__':
-    question = "Tell me from which direction is the remote in the image observed, \
-    using options such as front, back, left, right, top, bottom, and their combinations. Provide several options if necessary."
+
+    # question = "Tell me from which direction is the remote in the image observed, \
+    # using options such as front, back, left, right, top, bottom, and their combinations. Provide several options if necessary."
+
+    question = "Guess from which direction is the remote in the image observed, \
+    using the following keywords: front, back, left, right, top, bottom. If the remote is observed from multiple directions, provide more than one"
 
     prompt = "USER: <image>\n" + question + "\nASSISTANT:"
     topil = ToPILImage()

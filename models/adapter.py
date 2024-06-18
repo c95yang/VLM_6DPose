@@ -3,7 +3,7 @@ import torch
 #from mamba_ssm import Mamba
 
 class MLPAdapter(nn.Module):
-    def __init__(self, in_features, hidden_features, dtype, dropout=0.1):
+    def __init__(self, in_features, hidden_features, dtype, dropout=0.2):
         super().__init__()
 
         self.in_features = in_features

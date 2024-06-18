@@ -3,14 +3,12 @@ from math import log10
 from itertools import product
 import torch.nn as nn
 
-
 ALLOWED_RANDOM_SEARCH_PARAMS = ['log', 'int', 'float', 'item']
-
 
 def grid_search(model_class, train_loader, val_loader,
                 grid_search_spaces = {
                     "learning_rate": [0.0001, 0.001, 0.01, 0.1],
-                    "reg": [1e-4, 1e-5, 1e-6]
+                    "reg": [1e-3, 1e-4, 1e-5, 1e-6]
                 },
                 epochs=20, patience=5):
     """
