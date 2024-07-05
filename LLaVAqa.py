@@ -45,7 +45,7 @@ from torch.utils.tensorboard import SummaryWriter
 
 from warmup_scheduler import GradualWarmupScheduler
 
-class LLaVAClassifier:
+class LLaVAqa:
     def __init__(self, bs: int) -> None:
         self.save_path = 'adapter.pth'
         self.load_path = 'adapter.pth'
@@ -225,6 +225,6 @@ class LLaVAClassifier:
                 plt.show()
 
 if __name__ == '__main__':
-    llava_classifier = LLaVAClassifier(bs=4)
+    llava_classifier = LLaVAqa(bs=4)
     llava_classifier.train_adapter(epochs=50)
     # llava_classifier.ask_question(llava_classifier.load_image('/home/cc/Downloads/cat-container.jpg'), "What do you see in this photo? Is it a cat? \n")

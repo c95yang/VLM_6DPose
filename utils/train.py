@@ -5,10 +5,10 @@ from torch.utils.data import DataLoader
 
 def train_adapter(model_class, epochs, train_descriptions, val_descriptions, fusion) -> None:
     train_dataset = Remote14(root_dir=model_class.image_dir, is_train=True, descriptions_file=train_descriptions)
-    train_loader = DataLoader(train_dataset, batch_size=model_class.bs, shuffle=True, pin_memory=True)
+    train_loader = DataLoader(train_dataset, batch_size=model_class.bs, pin_memory=True) # shuffle=True, 
     
     val_dataset = Remote14(root_dir=model_class.image_dir, is_val=True, descriptions_file=val_descriptions)
-    val_loader = DataLoader(val_dataset, batch_size=model_class.bs, shuffle=False, pin_memory=True)
+    val_loader = DataLoader(val_dataset, batch_size=model_class.bs, pin_memory=True) # shuffle=False,
 
     best_val_loss = float('inf')
     #model_class.clip_model.eval()  
@@ -46,47 +46,50 @@ def train_adapter(model_class, epochs, train_descriptions, val_descriptions, fus
             #     text_features = text_features / text_features.norm(dim=-1, keepdim=True).to(model_class.device)
             # ##############################################################################################################
 
-            # ###################### blip embeds ########################################################################
-            # with torch.no_grad():
-            #     images = images.to(model_class.device)
-            #     image_features = model_class.blip_model(images, descriptions, mode='image')
-            #     image_features = image_features.mean(dim=1)
-            #     image_features = image_features / image_features.norm(p=2, dim=-1, keepdim=True).to(model_class.device)
-            # image_features = model_class.adapter_image(image_features)
-
-            # if fusion:
-            #     with torch.no_grad():
-            #         descriptions_features = model_class.blip_model(images, descriptions, mode='text')
-            #         descriptions_features = descriptions_features.mean(dim=1)
-            #         descriptions_features = descriptions_features / descriptions_features.norm(p=2, dim=-1, keepdim=True).to(model_class.device)
-            #     descriptions_features = model_class.adapter_descriptions(descriptions_features)
-
-            # with torch.no_grad():
-            #     text_features = model_class.blip_model(images, model_class.questions, mode='text')[:,0]
-            #     text_features = text_features / text_features.norm(dim=-1, keepdim=True).to(model_class.device)
-            # ##############################################################################################################
-
-            # ###################### Cosine Similarity fusion ##############################################################
-            # cos_sim = torch.matmul(image_features, text_features.transpose(0, 1))
-            # if fusion:
-            #     cos_sim += torch.matmul(descriptions_features, text_features.transpose(0, 1))
-            # predicted_classes = torch.argmax(cos_sim, dim=-1)
-            # ##############################################################################################################
-
-            ###################### blip multimodal ########################################################################
+            ###################### blip embeds ########################################################################
             with torch.no_grad():
                 images = images.to(model_class.device)
-                multimodal_features = model_class.blip_model(images, descriptions, mode='multimodal')[:,0]
-                multimodal_features = multimodal_features / multimodal_features.norm(p=2, dim=-1, keepdim=True).to(model_class.device)
-            multimodal_features = model_class.adapter_image(multimodal_features)
+                image_features = model_class.blip_model(images, descriptions, mode='image')
+                image_features = image_features.mean(dim=1)
+                image_features = image_features / image_features.norm(p=2, dim=-1, keepdim=True).to(model_class.device)
+            image_features = model_class.adapter_image(image_features)
+
+            if fusion:
+                with torch.no_grad():
+                    descriptions_features = model_class.blip_model(images, descriptions, mode='text')
+                    descriptions_features = descriptions_features.mean(dim=1)
+                    descriptions_features = descriptions_features / descriptions_features.norm(p=2, dim=-1, keepdim=True).to(model_class.device)
+                descriptions_features = model_class.adapter_descriptions(descriptions_features)
 
             with torch.no_grad():
                 text_features = model_class.blip_model(images, model_class.questions, mode='text')[:,0]
                 text_features = text_features / text_features.norm(dim=-1, keepdim=True).to(model_class.device)
+            ##############################################################################################################
 
-            cos_sim = torch.matmul(multimodal_features, text_features.transpose(0, 1))
+            ###################### Cosine Similarity fusion ##############################################################
+            cos_sim = torch.matmul(image_features, text_features.transpose(0, 1))
+            if fusion:
+                cos_sim += torch.matmul(descriptions_features, text_features.transpose(0, 1))
+            print(cos_sim)
             predicted_classes = torch.argmax(cos_sim, dim=-1)
             ##############################################################################################################
+
+            # ###################### blip multimodal ########################################################################
+            # with torch.no_grad():
+            #     images = images.to(model_class.device)
+            #     multimodal_features = model_class.blip_model(images, descriptions, mode='multimodal')
+            #     multimodal_features = multimodal_features.mean(dim=1)
+            #     multimodal_features = multimodal_features / multimodal_features.norm(p=2, dim=-1, keepdim=True).to(model_class.device)
+            # multimodal_features = model_class.adapter_image(multimodal_features)
+
+            # with torch.no_grad():
+            #     text_features = model_class.blip_model(images, model_class.questions, mode='text')
+            #     text_features = text_features.mean(dim=1)
+            #     text_features = text_features / text_features.norm(dim=-1, keepdim=True).to(model_class.device)
+
+            # cos_sim = torch.matmul(multimodal_features, text_features.transpose(0, 1))
+            # predicted_classes = torch.argmax(cos_sim, dim=-1)
+            # ##############################################################################################################
 
             loss = model_class.criterion(cos_sim, labels.to(model_class.device))
 
@@ -140,47 +143,47 @@ def train_adapter(model_class, epochs, train_descriptions, val_descriptions, fus
                 #     text_features = text_features / text_features.norm(dim=-1, keepdim=True).to(model_class.device)
                 # ##############################################################################################################
 
-                # ###################### blip embeds ########################################################################
-                # with torch.no_grad():
-                #     images = images.to(model_class.device)
-                #     image_features = model_class.blip_model(images, descriptions, mode='image')
-                #     image_features = image_features.mean(dim=1)
-                #     image_features = image_features / image_features.norm(p=2, dim=-1, keepdim=True).to(model_class.device)
-                # image_features = model_class.adapter_image(image_features)
-
-                # if fusion:
-                #     with torch.no_grad():
-                #         descriptions_features = model_class.blip_model(images, descriptions, mode='text')
-                #         descriptions_features = descriptions_features.mean(dim=1)
-                #         descriptions_features = descriptions_features / descriptions_features.norm(p=2, dim=-1, keepdim=True).to(model_class.device)
-                #     descriptions_features = model_class.adapter_descriptions(descriptions_features)
-
-                # with torch.no_grad():
-                #     text_features = model_class.blip_model(images, model_class.questions, mode='text')[:,0]
-                #     text_features = text_features / text_features.norm(dim=-1, keepdim=True).to(model_class.device)
-                # ##############################################################################################################
-
-                # ###################### Cosine Similarity fusion ##############################################################
-                # cos_sim = torch.matmul(image_features, text_features.transpose(0, 1))
-                # if fusion:
-                #     cos_sim += torch.matmul(descriptions_features, text_features.transpose(0, 1))
-                # predicted_classes = torch.argmax(cos_sim, dim=-1)
-                # ##############################################################################################################
-
-                ###################### blip multimodal ########################################################################
+                ###################### blip embeds ########################################################################
                 with torch.no_grad():
                     images = images.to(model_class.device)
-                    multimodal_features = model_class.blip_model(images, descriptions, mode='multimodal')[:,0]
-                    multimodal_features = multimodal_features / multimodal_features.norm(p=2, dim=-1, keepdim=True).to(model_class.device)
-                multimodal_features = model_class.adapter_image(multimodal_features)
+                    image_features = model_class.blip_model(images, descriptions, mode='image')
+                    image_features = image_features.mean(dim=1)
+                    image_features = image_features / image_features.norm(p=2, dim=-1, keepdim=True).to(model_class.device)
+                image_features = model_class.adapter_image(image_features)
+
+                if fusion:
+                    with torch.no_grad():
+                        descriptions_features = model_class.blip_model(images, descriptions, mode='text')
+                        descriptions_features = descriptions_features.mean(dim=1)
+                        descriptions_features = descriptions_features / descriptions_features.norm(p=2, dim=-1, keepdim=True).to(model_class.device)
+                    descriptions_features = model_class.adapter_descriptions(descriptions_features)
 
                 with torch.no_grad():
                     text_features = model_class.blip_model(images, model_class.questions, mode='text')[:,0]
                     text_features = text_features / text_features.norm(dim=-1, keepdim=True).to(model_class.device)
+                ##############################################################################################################
 
-                cos_sim = torch.matmul(multimodal_features, text_features.transpose(0, 1))
+                ###################### Cosine Similarity fusion ##############################################################
+                cos_sim = torch.matmul(image_features, text_features.transpose(0, 1))
+                if fusion:
+                    cos_sim += torch.matmul(descriptions_features, text_features.transpose(0, 1))
                 predicted_classes = torch.argmax(cos_sim, dim=-1)
                 ##############################################################################################################
+
+                # ###################### blip multimodal ########################################################################
+                # with torch.no_grad():
+                #     images = images.to(model_class.device)
+                #     multimodal_features = model_class.blip_model(images, descriptions, mode='multimodal')[:,0]
+                #     multimodal_features = multimodal_features / multimodal_features.norm(p=2, dim=-1, keepdim=True).to(model_class.device)
+                # multimodal_features = model_class.adapter_image(multimodal_features)
+
+                # with torch.no_grad():
+                #     text_features = model_class.blip_model(images, model_class.questions, mode='text')[:,0]
+                #     text_features = text_features / text_features.norm(dim=-1, keepdim=True).to(model_class.device)
+
+                # cos_sim = torch.matmul(multimodal_features, text_features.transpose(0, 1))
+                # predicted_classes = torch.argmax(cos_sim, dim=-1)
+                # ##############################################################################################################
 
                 model_class.metrics['val']['preds'].extend(predicted_classes.cpu().tolist())
                 model_class.metrics['val']['gts'].extend(labels.cpu().tolist())

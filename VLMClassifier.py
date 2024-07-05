@@ -8,7 +8,7 @@ import torch.nn as nn
 import torch.optim as optim
 from torch.utils.tensorboard import SummaryWriter
 
-from models.adapter import MLPAdapter #, TransformerAdapter
+from models.adapter import MLPAdapter, TransformerAdapter
 from utils.train import train_adapter
 
 # from utils.test import test_adapter, inference_single_image
@@ -64,13 +64,13 @@ class VLMClassifier:
 
         if self.adapter_image_type == 'mlp':
             self.adapter_image = MLPAdapter(in_features=self.in_features, hidden_features=self.in_features, dtype=self.dtype).to(device)
-        # elif self.adapter_image_type == 'transformer':
-        #     self.adapter_image = TransformerAdapter(in_features=self.in_features, hidden_features=self.in_features, dtype=self.dtype).to(device)
+        elif self.adapter_image_type == 'transformer':
+            self.adapter_image = TransformerAdapter(in_features=self.in_features, hidden_features=self.in_features, dtype=self.dtype).to(device)
 
         if self.adapter_descriptions_type == 'mlp':
             self.adapter_descriptions = MLPAdapter(in_features=self.in_features, hidden_features=self.in_features, dtype=self.dtype).to(device)
-        # elif self.adapter_descriptions_type == 'transformer':
-        #     self.adapter_descriptions = TransformerAdapter(in_features=self.in_features, hidden_features=self.in_features, dtype=self.dtype).to(device)
+        elif self.adapter_descriptions_type == 'transformer':
+            self.adapter_descriptions = TransformerAdapter(in_features=self.in_features, hidden_features=self.in_features, dtype=self.dtype).to(device)
 
         self.classes = ['back', 'bottom', 'bottomleftback', 'bottomleftfront', 'bottomrightback', 'bottomrightfront', 'front', 
                         'left', 'right', 'top', 'topleftback', 'topleftfront', 'toprightback', 'toprightfront']
@@ -132,7 +132,7 @@ if __name__ == '__main__':
         'epochs': 50,
         'train_descriptions': "descriptions/train_descriptions_concise.json",
         'val_descriptions': "descriptions/val_descriptions_concise.json",
-        'fusion': True,
+        'fusion': False,
     }
     train_adapter(**hparams)
     
