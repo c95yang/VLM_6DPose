@@ -130,9 +130,9 @@ if __name__ == '__main__':
     hparams = {
         'model_class': classifier, 
         'epochs': 50,
-        'train_descriptions': "data/train_descriptions_concise.json",
-        'val_descriptions': "data/val_descriptions_concise.json",
-        'fusion': False,
+        'train_descriptions': "descriptions/train_descriptions_concise.json",
+        'val_descriptions': "descriptions/val_descriptions_concise.json",
+        'fusion': True,
     }
     train_adapter(**hparams)
     
