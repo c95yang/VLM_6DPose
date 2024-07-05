@@ -1,15 +1,18 @@
 from typing import List, Dict
 import torch
-from transformers import CLIPProcessor, CLIPModel
+
+from BLIP.models.blip import blip_feature_extractor
+# from transformers import CLIPProcessor, CLIPModel
+
 import torch.nn as nn
 import torch.optim as optim
 from torch.utils.tensorboard import SummaryWriter
-#from warmup_scheduler import GradualWarmupScheduler
 
-from models.adapter import MLPAdapter, TransformerAdapter#, MambaAdapter
+from models.adapter import MLPAdapter #, TransformerAdapter
 from utils.train import train_adapter
-from utils.test import test_adapter, inference_single_image
-from utils.classify import classify_zeroshot, classify_fewshotshot
+
+# from utils.test import test_adapter, inference_single_image
+# from utils.classify import classify_zeroshot, classify_fewshotshot
 
 class VLMClassifier:
     def __init__(self, 
@@ -53,22 +56,21 @@ class VLMClassifier:
 
         self.llava_path = llava_path
 
-        self.clip_model = CLIPModel.from_pretrained(self.clip_model_name).to(device)
-        self.processor = CLIPProcessor.from_pretrained(self.clip_model_name)
+        # self.clip_model = CLIPModel.from_pretrained(self.clip_model_name).to(device)
+        # self.processor = CLIPProcessor.from_pretrained(self.clip_model_name)
+
+        model_url = 'https://storage.googleapis.com/sfr-vision-language-research/BLIP/models/model_base.pth'
+        self.blip_model = blip_feature_extractor(pretrained=model_url, image_size=800, vit='base').to(device)
 
         if self.adapter_image_type == 'mlp':
             self.adapter_image = MLPAdapter(in_features=self.in_features, hidden_features=self.in_features, dtype=self.dtype).to(device)
-        elif self.adapter_image_type == 'transformer':
-            self.adapter_image = TransformerAdapter(in_features=self.in_features, hidden_features=self.in_features, dtype=self.dtype).to(device)
-        # elif self.adapter_image_type == 'mamba':
-        #     self.adapter_image = MambaAdapter(in_features=self.in_features, dtype=self.dtype).to(device)
+        # elif self.adapter_image_type == 'transformer':
+        #     self.adapter_image = TransformerAdapter(in_features=self.in_features, hidden_features=self.in_features, dtype=self.dtype).to(device)
 
         if self.adapter_descriptions_type == 'mlp':
             self.adapter_descriptions = MLPAdapter(in_features=self.in_features, hidden_features=self.in_features, dtype=self.dtype).to(device)
-        elif self.adapter_descriptions_type == 'transformer':
-            self.adapter_descriptions = TransformerAdapter(in_features=self.in_features, hidden_features=self.in_features, dtype=self.dtype).to(device)
-        # elif self.adapter_descriptions_type == 'mamba':
-        #     self.adapter_descriptions = MambaAdapter(in_features=self.in_features, dtype=self.dtype).to(device)
+        # elif self.adapter_descriptions_type == 'transformer':
+        #     self.adapter_descriptions = TransformerAdapter(in_features=self.in_features, hidden_features=self.in_features, dtype=self.dtype).to(device)
 
         self.classes = ['back', 'bottom', 'bottomleftback', 'bottomleftfront', 'bottomrightback', 'bottomrightfront', 'front', 
                         'left', 'right', 'top', 'topleftback', 'topleftfront', 'toprightback', 'toprightfront']
@@ -78,11 +80,6 @@ class VLMClassifier:
         self.optimizer_image = optim.Adam(self.adapter_image.parameters(), lr=self.lr, weight_decay=self.weight_decay)
         self.optimizer_descriptions = optim.Adam(self.adapter_descriptions.parameters(), lr=self.lr, weight_decay=self.weight_decay)
         self.criterion = nn.CrossEntropyLoss()
-
-        # self.scheduler_cosine_image = torch.optim.lr_scheduler.CosineAnnealingLR(self.optimizer_image, T_max=3, eta_min=1e-6)
-        # self.scheduler_image = GradualWarmupScheduler(self.optimizer_image, multiplier=1, total_epoch=self.warmup_epochs, after_scheduler=self.scheduler_cosine_image)
-        # self.scheduler_cosine_descriptions = torch.optim.lr_scheduler.CosineAnnealingLR(self.optimizer_descriptions, T_max=3, eta_min=1e-6)
-        # self.scheduler_descriptions = GradualWarmupScheduler(self.optimizer_descriptions, multiplier=1, total_epoch=self.warmup_epochs, after_scheduler=self.scheduler_cosine_descriptions)
 
         self.scheduler_image = torch.optim.lr_scheduler.CosineAnnealingLR(self.optimizer_image, T_max=3, eta_min=1e-6)
         self.scheduler_descriptions = torch.optim.lr_scheduler.CosineAnnealingLR(self.optimizer_descriptions, T_max=3, eta_min=1e-6)
@@ -101,7 +98,7 @@ class VLMClassifier:
             attr = getattr(self, attr_name)
             if isinstance(attr, nn.Module):
                 for name, param in attr.named_parameters():
-                    print(f"Model: {attr_name}, Parameter: {name}, Dtype: {param.dtype}")
+                    print(f"Model: {attr_name}, Parameter: {name}, Dtype: {param.dtype}, Device: {param.device}")
 
 
 if __name__ == '__main__':
@@ -114,17 +111,17 @@ if __name__ == '__main__':
         'load_path_descriptions': 'ckpts/adapter_descriptions.pth',
 
         'device': torch.device("cuda"),
-        'dtype': torch.float64,
+        'dtype': torch.float32,
         'image_dir': 'data/remote14',
         'clip_model_name': 'openai/clip-vit-large-patch14-336', # 'openai/clip-vit-large-patch14-336', 'openai/clip-vit-base-patch16'
         'in_features': 768, #512 for clip base, 768 for clip large
         'llava_path': "llava-hf/llava-1.5-7b-hf",
 
-        'adapter_image_type': 'mlp', # 'mlp', 'transformer', 'mamba'
-        'adapter_descriptions_type': 'mlp', # 'mlp', 'transformer', 'mamba'
+        'adapter_image_type': 'mlp', # 'mlp', 'transformer'
+        'adapter_descriptions_type': 'mlp', # 'mlp', 'transformer'
         'lr': 1e-2,
         'weight_decay': 1e-4,
-        'bs': 16, #16
+        'bs': 8, #16
     }
 
     classifier = VLMClassifier(**hparams)
@@ -133,8 +130,8 @@ if __name__ == '__main__':
     hparams = {
         'model_class': classifier, 
         'epochs': 50,
-        'train_descriptions': "train_descriptions_concise.json",
-        'val_descriptions': "val_descriptions_concise.json",
+        'train_descriptions': "data/train_descriptions_concise.json",
+        'val_descriptions': "data/val_descriptions_concise.json",
         'fusion': False,
     }
     train_adapter(**hparams)

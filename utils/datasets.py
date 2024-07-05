@@ -43,15 +43,12 @@ class Remote14(Dataset):
         self.transform = transforms.Compose([
             transforms.Resize(self.desired_size),
             transforms.ToTensor(),  # Convert PIL image to tensor and scale to [0, 1]
-            #transforms.Normalize(mean=[0.6918, 0.6922, 0.6936], std=[0.1303, 0.1282, 0.1251]),
-            # Note: mean and std are adjusted to center the data but keep it in the [0, 1] range
             transforms.RandomApply([
                 transforms.ColorJitter(brightness=0.2, contrast=0.2, saturation=0.2, hue=0.2),
             ], p=0.5),
             transforms.RandomApply([
                 transforms.RandomResizedCrop(size=self.desired_size, scale=(0.8, 1.0), ratio=(0.9, 1.1), interpolation=transforms.InterpolationMode.BILINEAR),
             ], p=0.2),
-            #transforms.Lambda(lambda x: torch.clamp(x, 0, 1)),  # Clamp values to [0, 1]
         ])
 
     def load_images_and_labels(self): 
@@ -98,7 +95,6 @@ class Remote14(Dataset):
         image = self.transform(image)
         # plt.imshow(image)
         # plt.show()
-        #image = transforms.ToTensor()(image)
 
         label_idx = self.class_to_idx[label]
 
@@ -118,6 +114,5 @@ class Remote14(Dataset):
     def load_image(self, img_path):
         image = Image.open(img_path).convert("RGB")
         image = self.transform(image)
-        #image = transforms.ToTensor()(image)
         return image
     
