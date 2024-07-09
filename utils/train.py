@@ -67,10 +67,9 @@ def train_adapter(model_class, epochs, train_descriptions, val_descriptions, fus
             ##############################################################################################################
 
             ###################### Cosine Similarity fusion ##############################################################
-            cos_sim = torch.matmul(image_features, text_features.transpose(0, 1))
+            cos_sim = torch.nn.functional.cosine_similarity(image_features.unsqueeze(1), text_features.unsqueeze(0), dim=2)
             if fusion:
-                cos_sim += torch.matmul(descriptions_features, text_features.transpose(0, 1))
-            print(cos_sim)
+                cos_sim = torch.nn.functional.cosine_similarity(descriptions_features.unsqueeze(1), text_features.unsqueeze(0), dim=2)
             predicted_classes = torch.argmax(cos_sim, dim=-1)
             ##############################################################################################################
 
@@ -87,13 +86,16 @@ def train_adapter(model_class, epochs, train_descriptions, val_descriptions, fus
             #     text_features = text_features.mean(dim=1)
             #     text_features = text_features / text_features.norm(dim=-1, keepdim=True).to(model_class.device)
 
-            # cos_sim = torch.matmul(multimodal_features, text_features.transpose(0, 1))
+            # # cos_sim = torch.matmul(multimodal_features, text_features.transpose(0, 1))
+            # cos_sim = torch.nn.functional.cosine_similarity(multimodal_features.unsqueeze(1), text_features.unsqueeze(0), dim=2)
+            # print(cos_sim)
             # predicted_classes = torch.argmax(cos_sim, dim=-1)
             # ##############################################################################################################
 
             loss = model_class.criterion(cos_sim, labels.to(model_class.device))
 
             train_loss = loss.item()
+            print(f"Train loss: {train_loss}")
             loss.backward()
 
             model_class.optimizer_image.step()
@@ -164,9 +166,9 @@ def train_adapter(model_class, epochs, train_descriptions, val_descriptions, fus
                 ##############################################################################################################
 
                 ###################### Cosine Similarity fusion ##############################################################
-                cos_sim = torch.matmul(image_features, text_features.transpose(0, 1))
+                cos_sim = torch.nn.functional.cosine_similarity(image_features.unsqueeze(1), text_features.unsqueeze(0), dim=2)
                 if fusion:
-                    cos_sim += torch.matmul(descriptions_features, text_features.transpose(0, 1))
+                    cos_sim = torch.nn.functional.cosine_similarity(descriptions_features.unsqueeze(1), text_features.unsqueeze(0), dim=2)
                 predicted_classes = torch.argmax(cos_sim, dim=-1)
                 ##############################################################################################################
 
@@ -181,7 +183,8 @@ def train_adapter(model_class, epochs, train_descriptions, val_descriptions, fus
                 #     text_features = model_class.blip_model(images, model_class.questions, mode='text')[:,0]
                 #     text_features = text_features / text_features.norm(dim=-1, keepdim=True).to(model_class.device)
 
-                # cos_sim = torch.matmul(multimodal_features, text_features.transpose(0, 1))
+                # # cos_sim = torch.matmul(multimodal_features, text_features.transpose(0, 1))
+                # cos_sim = torch.nn.functional.cosine_similarity(multimodal_features.unsqueeze(1), text_features.unsqueeze(0), dim=2)
                 # predicted_classes = torch.argmax(cos_sim, dim=-1)
                 # ##############################################################################################################
 

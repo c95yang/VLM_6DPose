@@ -119,7 +119,7 @@ if __name__ == '__main__':
 
         'adapter_image_type': 'mlp', # 'mlp', 'transformer'
         'adapter_descriptions_type': 'mlp', # 'mlp', 'transformer'
-        'lr': 1e-2,
+        'lr': 1e-4,
         'weight_decay': 1e-4,
         'bs': 8, #16
     }
@@ -132,7 +132,7 @@ if __name__ == '__main__':
         'epochs': 50,
         'train_descriptions': "descriptions/train_descriptions_concise.json",
         'val_descriptions': "descriptions/val_descriptions_concise.json",
-        'fusion': False,
+        'fusion': True,
     }
     train_adapter(**hparams)
     
