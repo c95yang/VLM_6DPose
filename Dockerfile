@@ -31,4 +31,5 @@ RUN python -m pip install \
     h5py==3.8.0 \
     matplotlib\
     tensorboard\
-    mamba-ssm
+    mamba-ssm\
+    timm

@@ -25,7 +25,7 @@ class Remote14(IterableDataset):
                         'right', 'top', 'topleftback', 'topleftfront', 'toprightback', 'toprightfront']
         self.class_to_idx = {cls: idx for idx, cls in enumerate(self.classes)}
 
-        self.transform = transforms.Compose([
+        self.transform_train = transforms.Compose([
             transforms.Resize(self.desired_size),
             transforms.ToTensor(),  
             transforms.RandomApply([
@@ -34,6 +34,11 @@ class Remote14(IterableDataset):
             transforms.RandomApply([
                 transforms.RandomResizedCrop(size=self.desired_size, scale=(0.8, 1.0), ratio=(0.9, 1.1), interpolation=transforms.InterpolationMode.BILINEAR),
             ], p=0.2),
+        ])
+
+        self.transform = transforms.Compose([
+            transforms.Resize(self.desired_size),
+            transforms.ToTensor()
         ])
 
     def load_descriptions(self, descriptions_file):
@@ -79,7 +84,10 @@ class Remote14(IterableDataset):
 
     def load_image(self, img_path):
         image = Image.open(img_path).convert("RGB")
-        image = self.transform(image)
+        if self.is_train:
+            image = self.transform_train(image)
+        else:
+            image = self.transform(image)
         return image
     
     def get_class_labels(self):

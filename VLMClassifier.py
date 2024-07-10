@@ -1,8 +1,8 @@
 from typing import List, Dict
 import torch
 
-from BLIP.models.blip import blip_feature_extractor
-# from transformers import CLIPProcessor, CLIPModel
+# from BLIP.models.blip import blip_feature_extractor
+from transformers import CLIPProcessor, CLIPModel
 
 import torch.nn as nn
 import torch.optim as optim
@@ -11,7 +11,7 @@ from torch.utils.tensorboard import SummaryWriter
 from models.adapter import MLPAdapter, TransformerAdapter
 from utils.train import train_adapter
 
-# from utils.test import test_adapter, inference_single_image
+from utils.test import test_adapter, inference_single_image
 # from utils.classify import classify_zeroshot, classify_fewshotshot
 
 class VLMClassifier:
@@ -56,11 +56,11 @@ class VLMClassifier:
 
         self.llava_path = llava_path
 
-        # self.clip_model = CLIPModel.from_pretrained(self.clip_model_name).to(device)
-        # self.processor = CLIPProcessor.from_pretrained(self.clip_model_name)
+        self.clip_model = CLIPModel.from_pretrained(self.clip_model_name).to(device)
+        self.processor = CLIPProcessor.from_pretrained(self.clip_model_name)
 
-        model_url = 'https://storage.googleapis.com/sfr-vision-language-research/BLIP/models/model_base.pth'
-        self.blip_model = blip_feature_extractor(pretrained=model_url, image_size=800, vit='base').to(device)
+        # model_url = 'https://storage.googleapis.com/sfr-vision-language-research/BLIP/models/model_base.pth'
+        # self.blip_model = blip_feature_extractor(pretrained=model_url, image_size=800, vit='base').to(device)
 
         if self.adapter_image_type == 'mlp':
             self.adapter_image = MLPAdapter(in_features=self.in_features, hidden_features=self.in_features, dtype=self.dtype).to(device)
@@ -117,8 +117,8 @@ if __name__ == '__main__':
         'in_features': 768, #512 for clip base, 768 for clip large
         'llava_path': "llava-hf/llava-1.5-7b-hf",
 
-        'adapter_image_type': 'mlp', # 'mlp', 'transformer'
-        'adapter_descriptions_type': 'mlp', # 'mlp', 'transformer'
+        'adapter_image_type': 'transformer', # 'mlp', 'transformer'
+        'adapter_descriptions_type': 'transformer', # 'mlp', 'transformer'
         'lr': 1e-4,
         'weight_decay': 1e-4,
         'bs': 8, #16
@@ -129,13 +129,14 @@ if __name__ == '__main__':
 
     hparams = {
         'model_class': classifier, 
-        'epochs': 50,
+        'epochs': 100,
         'train_descriptions': "descriptions/train_descriptions_concise.json",
         'val_descriptions': "descriptions/val_descriptions_concise.json",
         'fusion': True,
+        'lam': 0.1
     }
     train_adapter(**hparams)
     
-    # test_adapter(model_class=classifier, split='test', plot=True)
+    # test_adapter(model_class=classifier, split='test', plot=True, fusion=False, lam=0.1)
     # inference_single_image(model_class=classifier, image_path='data/remote14/train/remote-comfee/BottomRightBack.png', plot=True)
 

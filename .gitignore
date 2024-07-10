@@ -3,6 +3,7 @@ archive/
 runs/
 renders/
 BLIP/
+ckpts/
 
 # Byte-compiled / optimized / DLL files
 __pycache__/

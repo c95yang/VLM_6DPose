@@ -17,7 +17,9 @@ class MLPAdapter(nn.Module):
             nn.Linear(in_features=self.in_features, out_features=self.hidden_features),
             nn.GELU(),
             nn.BatchNorm1d(self.hidden_features),
-            nn.Dropout(self.dropout)
+            nn.Dropout(self.dropout),
+            nn.Linear(in_features=self.in_features, out_features=self.hidden_features),
+            nn.GELU()
             )
         
         self._initialize_weights()
@@ -47,8 +49,8 @@ class TransformerAdapter(nn.Module):
         self.input_projection = nn.Sequential(
             nn.BatchNorm1d(self.in_features),
             nn.Dropout(self.dropout),
-            # nn.Linear(in_features=self.in_features, out_features=self.hidden_features),
-            # nn.GELU()
+            nn.Linear(in_features=self.in_features, out_features=self.hidden_features),
+            nn.GELU()
         )
 
         self.encoder_layer = nn.TransformerEncoderLayer(d_model=self.hidden_features, nhead=self.nhead)
@@ -57,8 +59,8 @@ class TransformerAdapter(nn.Module):
         self.output_projection = nn.Sequential(
             nn.BatchNorm1d(self.hidden_features),
             nn.Dropout(self.dropout),
-            # nn.Linear(in_features=self.hidden_features, out_features=self.in_features),
-            # nn.GELU()
+            nn.Linear(in_features=self.hidden_features, out_features=self.in_features),
+            nn.GELU()
         )
 
         for param in self.parameters():
