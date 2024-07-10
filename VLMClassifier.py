@@ -1,25 +1,22 @@
 from typing import List, Dict
 import torch
-
-from BLIP.models.blip import blip_feature_extractor
-# from transformers import CLIPProcessor, CLIPModel
-
 import torch.nn as nn
 import torch.optim as optim
 from torch.utils.tensorboard import SummaryWriter
 
 from models.adapter import MLPAdapter, TransformerAdapter
 from utils.train import train_adapter
-
 from utils.test import test_adapter, inference_single_image
 # from utils.classify import classify_zeroshot, classify_fewshotshot
+
+from BLIP.models.blip import blip_feature_extractor
+# from transformers import CLIPProcessor, CLIPModel
 
 class VLMClassifier:
     def __init__(self, 
                  device: torch.device, 
                  dtype: torch.dtype,
                  bs: int, 
-                 clip_model_name: str, 
                  adapter_image_type: str, 
                  adapter_descriptions_type: str, 
                  load_path: str, 
@@ -38,7 +35,6 @@ class VLMClassifier:
         torch.set_default_dtype(self.dtype)
 
         self.bs = bs
-        self.clip_model_name = clip_model_name
         self.adapter_image_type = adapter_image_type
         self.adapter_descriptions_type = adapter_descriptions_type
         self.load_path = load_path
@@ -56,7 +52,8 @@ class VLMClassifier:
 
         self.llava_path = llava_path
 
-        # self.clip_model = CLIPModel.from_pretrained(self.clip_model_name).to(device)
+        # clip_model_name = 'openai/clip-vit-large-patch14-336' # 'openai/clip-vit-large-patch14-336', 'openai/clip-vit-base-patch16'
+        # self.clip_model = CLIPModel.from_pretrained(clip_model_name).to(device)
         # self.processor = CLIPProcessor.from_pretrained(self.clip_model_name)
 
         model_url = 'https://storage.googleapis.com/sfr-vision-language-research/BLIP/models/model_base.pth'
@@ -113,7 +110,6 @@ if __name__ == '__main__':
         'device': torch.device("cuda"),
         'dtype': torch.float32,
         'image_dir': 'data/remote14',
-        'clip_model_name': 'openai/clip-vit-large-patch14-336', # 'openai/clip-vit-large-patch14-336', 'openai/clip-vit-base-patch16'
         'in_features': 768, #512 for clip base, 768 for clip large
         'llava_path': "llava-hf/llava-1.5-7b-hf",
 
@@ -133,7 +129,7 @@ if __name__ == '__main__':
         'train_descriptions': "descriptions/train_descriptions_concise.json",
         'val_descriptions': "descriptions/val_descriptions_concise.json",
         'fusion': False,
-        'lam': 0.1
+        'lam': 0.5
     }
     train_adapter(**hparams)
     
