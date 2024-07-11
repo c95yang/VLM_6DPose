@@ -2,7 +2,7 @@ import torch.nn as nn
 import torch
 #from mamba_ssm import Mamba
 
-class MLPAdapter(nn.Module):
+class MLP(nn.Module):
     def __init__(self, in_features, hidden_features, dtype, dropout=0.2):
         super().__init__()
 
@@ -12,15 +12,11 @@ class MLPAdapter(nn.Module):
         torch.set_default_dtype(dtype)
 
         self.layers = nn.Sequential(
-            nn.BatchNorm1d(self.in_features),
-            nn.Dropout(self.dropout),
             nn.Linear(in_features=self.in_features, out_features=self.hidden_features),
             nn.GELU(),
-            nn.BatchNorm1d(self.hidden_features),
+            nn.BatchNorm1d(self.in_features),
             nn.Dropout(self.dropout),
-            nn.Linear(in_features=self.in_features, out_features=self.hidden_features),
-            nn.GELU()
-            )
+        )
         
         self._initialize_weights()
 
@@ -32,8 +28,26 @@ class MLPAdapter(nn.Module):
                     nn.init.constant_(m.bias, 0)
 
     def forward(self, feat):
-        img_feat = self.layers(feat)
-        return img_feat
+        feat = self.layers(feat)
+        return feat
+
+class MLPAdapter(nn.Module):
+    def __init__(self, in_features, hidden_features, dtype, dropout=0.1):
+        super().__init__()
+
+        self.in_features = in_features
+        self.hidden_features = hidden_features
+        self.dropout = dropout
+        torch.set_default_dtype(dtype)
+
+        self.layers = nn.ModuleList()
+        for i in range(2):
+            self.layers.append(MLP(in_features=self.in_features, hidden_features=self.hidden_features, dtype=dtype, dropout=self.dropout))
+
+    def forward(self, feat):
+        for layer in self.layers:
+            feat = layer(feat)
+        return feat
 
 
 class TransformerAdapter(nn.Module):

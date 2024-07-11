@@ -9,8 +9,8 @@ from utils.train import train_adapter
 from utils.test import test_adapter, inference_single_image
 # from utils.classify import classify_zeroshot, classify_fewshotshot
 
-from BLIP.models.blip import blip_feature_extractor
-# from transformers import CLIPProcessor, CLIPModel
+# from BLIP.models.blip import blip_feature_extractor
+from transformers import CLIPProcessor, CLIPModel
 
 class VLMClassifier:
     def __init__(self, 
@@ -52,12 +52,12 @@ class VLMClassifier:
 
         self.llava_path = llava_path
 
-        # clip_model_name = 'openai/clip-vit-large-patch14-336' # 'openai/clip-vit-large-patch14-336', 'openai/clip-vit-base-patch16'
-        # self.clip_model = CLIPModel.from_pretrained(clip_model_name).to(device)
-        # self.processor = CLIPProcessor.from_pretrained(self.clip_model_name)
+        clip_model_name = 'openai/clip-vit-large-patch14-336' # 'openai/clip-vit-large-patch14-336', 'openai/clip-vit-base-patch16'
+        self.clip_model = CLIPModel.from_pretrained(clip_model_name).to(device)
+        self.processor = CLIPProcessor.from_pretrained(clip_model_name)
 
-        model_url = 'https://storage.googleapis.com/sfr-vision-language-research/BLIP/models/model_base.pth'
-        self.blip_model = blip_feature_extractor(pretrained=model_url, image_size=800, vit='base').to(device)
+        # model_url = 'https://storage.googleapis.com/sfr-vision-language-research/BLIP/models/model_base.pth'
+        # self.blip_model = blip_feature_extractor(pretrained=model_url, image_size=800, vit='base').to(device)
 
         if self.adapter_image_type == 'mlp':
             self.adapter_image = MLPAdapter(in_features=self.in_features, hidden_features=self.in_features, dtype=self.dtype).to(device)
@@ -87,7 +87,6 @@ class VLMClassifier:
     
     def _prepare_prompt(self) -> List[str]:
         questions = [f"A remote control device observed from {CLASS_NAME} direction." for CLASS_NAME in self.classes]
-        #questions.extend([f"A remote observed from {CLASS_NAME} direction." for CLASS_NAME in self.classes])
         return questions
     
     def get_all_parameters(self):
@@ -113,11 +112,11 @@ if __name__ == '__main__':
         'in_features': 768, #512 for clip base, 768 for clip large
         'llava_path': "llava-hf/llava-1.5-7b-hf",
 
-        'adapter_image_type': 'transformer', # 'mlp', 'transformer'
-        'adapter_descriptions_type': 'transformer', # 'mlp', 'transformer'
+        'adapter_image_type': 'mlp', # 'mlp', 'transformer'
+        'adapter_descriptions_type': 'mlp', # 'mlp', 'transformer'
         'lr': 1e-4,
         'weight_decay': 1e-4,
-        'bs': 4, #16
+        'bs': 8, #16
     }
 
     classifier = VLMClassifier(**hparams)
@@ -127,8 +126,7 @@ if __name__ == '__main__':
         'epochs': 100,
         'train_descriptions': "descriptions/train_descriptions_concise.json",
         'val_descriptions': "descriptions/val_descriptions_concise.json",
-        'fusion': False,
-        'lam': 0.5
+        'lam': 1
     }
     train_adapter(**hparams)
     
