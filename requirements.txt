@@ -7,3 +7,4 @@ protobuf==3.20.0
 torch-scatter==2.1.1
 ftfy==6.1.1
 h5py==3.8.0
+tensorboard

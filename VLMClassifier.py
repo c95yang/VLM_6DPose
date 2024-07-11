@@ -121,7 +121,6 @@ if __name__ == '__main__':
     }
 
     classifier = VLMClassifier(**hparams)
-    # classifier.get_all_parameters()
 
     hparams = {
         'model_class': classifier, 

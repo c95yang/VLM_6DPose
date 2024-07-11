@@ -5,10 +5,10 @@ from torch.utils.data import DataLoader
 
 def train_adapter(model_class, epochs, train_descriptions, val_descriptions, fusion, lam) -> None:
     train_dataset = Remote14(root_dir=model_class.image_dir, is_train=True, descriptions_file=train_descriptions)
-    train_loader = DataLoader(train_dataset, batch_size=model_class.bs, pin_memory=True) # shuffle=True, 
+    train_loader = DataLoader(train_dataset, batch_size=model_class.bs, pin_memory=True, num_workers=2) 
     
     val_dataset = Remote14(root_dir=model_class.image_dir, is_val=True, descriptions_file=val_descriptions)
-    val_loader = DataLoader(val_dataset, batch_size=model_class.bs, pin_memory=True) # shuffle=False,
+    val_loader = DataLoader(val_dataset, batch_size=model_class.bs, pin_memory=True, num_workers=2)
 
     best_val_loss = float('inf')
     # model_class.clip_model.eval()  
@@ -68,8 +68,8 @@ def train_adapter(model_class, epochs, train_descriptions, val_descriptions, fus
 
             ###################### Cosine Similarity fusion ##############################################################
             cos_sim = torch.nn.functional.cosine_similarity(image_features.unsqueeze(1), text_features.unsqueeze(0), dim=2)
-            # print(cos_sim)
-            # print(torch.nn.Softmax(dim=1)(cos_sim))
+            print(cos_sim)
+            print(torch.nn.Softmax(dim=1)(cos_sim))
             if fusion:
                 cos_sim += lam * torch.nn.functional.cosine_similarity(descriptions_features.unsqueeze(1), text_features.unsqueeze(0), dim=2)
             predicted_classes = torch.argmax(cos_sim, dim=-1)
