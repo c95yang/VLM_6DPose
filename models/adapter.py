@@ -3,7 +3,7 @@ import torch
 #from mamba_ssm import Mamba
 
 class MLP(nn.Module):
-    def __init__(self, in_features, hidden_features, dtype, dropout=0.2):
+    def __init__(self, in_features, hidden_features, dtype, dropout=0.1):
         super().__init__()
 
         self.in_features = in_features
@@ -13,6 +13,10 @@ class MLP(nn.Module):
 
         self.layers = nn.Sequential(
             nn.Linear(in_features=self.in_features, out_features=self.hidden_features),
+            nn.GELU(),
+            nn.BatchNorm1d(self.hidden_features),
+            nn.Dropout(self.dropout),
+            nn.Linear(in_features=self.hidden_features, out_features=self.in_features),
             nn.GELU(),
             nn.BatchNorm1d(self.in_features),
             nn.Dropout(self.dropout),
@@ -41,7 +45,7 @@ class MLPAdapter(nn.Module):
         torch.set_default_dtype(dtype)
 
         self.layers = nn.ModuleList()
-        for i in range(2):
+        for i in range(1):
             self.layers.append(MLP(in_features=self.in_features, hidden_features=self.hidden_features, dtype=dtype, dropout=self.dropout))
 
     def forward(self, feat):
@@ -57,7 +61,7 @@ class TransformerAdapter(nn.Module):
         self.hidden_features = hidden_features
         self.nhead = 8
         self.dropout = dropout
-        self.num_layers = 2
+        self.num_layers = 4
         torch.set_default_dtype(dtype)
          
         self.input_projection = nn.Sequential(
