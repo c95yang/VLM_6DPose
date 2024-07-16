@@ -2,6 +2,7 @@ import torch
 from tqdm import tqdm
 from utils.datasets import Remote60
 from torch.utils.data import DataLoader
+from utils.misc import HammingLoss, hemming_dist
 
 def train_adapter(model_class, epochs, train_descriptions, val_descriptions, lam) -> None:
     train_dataset = Remote60(root_dir=model_class.image_dir, is_train=True, descriptions_file=train_descriptions)
@@ -65,16 +66,16 @@ def train_adapter(model_class, epochs, train_descriptions, val_descriptions, lam
             ###################### Cosine Similarity fusion ##############################################################
             cos_sim = torch.nn.functional.cosine_similarity(image_features.unsqueeze(1), text_features.unsqueeze(0), dim=2)
             cos_sim = cos_sim / cos_sim.norm(dim=-1, keepdim=True)
-            print("image cos sim: ", cos_sim)
-            print(torch.nn.Softmax(dim=1)(cos_sim))
+            # print("image cos sim: ", cos_sim)
+            # print(torch.nn.Softmax(dim=1)(cos_sim))
             cos_sim_d = lam * torch.nn.functional.cosine_similarity(descriptions_features.unsqueeze(1), text_features.unsqueeze(0), dim=2)
             cos_sim_d = cos_sim_d / cos_sim_d.norm(dim=-1, keepdim=True)
-            print("cos sim d: ", cos_sim_d)
-            print(torch.nn.Softmax(dim=1)(cos_sim_d))
+            # print("cos sim d: ", cos_sim_d)
+            # print(torch.nn.Softmax(dim=1)(cos_sim_d))
             cos_sim += cos_sim_d
             cos_sim = cos_sim / cos_sim.norm(dim=-1, keepdim=True)
-            print("cos sim: ", cos_sim)
-            print(torch.nn.Softmax(dim=1)(cos_sim))
+            # print("cos sim: ", cos_sim)
+            # print(torch.nn.Softmax(dim=1)(cos_sim))
             predicted_classes = torch.argmax(cos_sim, dim=-1)        
             ##############################################################################################################
 
@@ -198,8 +199,8 @@ def train_adapter(model_class, epochs, train_descriptions, val_descriptions, lam
 
                 cos_sim += cos_sim_d
                 cos_sim = cos_sim / cos_sim.norm(dim=-1, keepdim=True)
-                print("cos sim: ", cos_sim)
-                print(torch.nn.Softmax(dim=1)(cos_sim))
+                # print("cos sim: ", cos_sim)
+                # print(torch.nn.Softmax(dim=1)(cos_sim))
                 predicted_classes = torch.argmax(cos_sim, dim=-1)        
                 ##############################################################################################################
                 val_loss = model_class.criterion(cos_sim, labels.to(model_class.device))
@@ -212,6 +213,14 @@ def train_adapter(model_class, epochs, train_descriptions, val_descriptions, lam
         train_acc = sum([1 for gt, pred in zip(model_class.metrics['train']['gts'], model_class.metrics['train']['preds']) if gt == pred]) / len(model_class.metrics['train']['gts'])
         val_acc = sum([1 for gt, pred in zip(model_class.metrics['val']['gts'], model_class.metrics['val']['preds']) if gt == pred]) / len(model_class.metrics['val']['gts'])
         model_class.writer.add_scalars('Acc', {'Train': train_acc, 'Validation': val_acc}, epoch)
+
+        train_acc_h1 = sum([1 for gt, pred in zip(model_class.metrics['train']['gts'], model_class.metrics['train']['preds']) if hemming_dist(gt, pred) <= 2]) / len(model_class.metrics['train']['gts'])
+        val_acc_h1 = sum([1 for gt, pred in zip(model_class.metrics['val']['gts'], model_class.metrics['val']['preds']) if hemming_dist(gt, pred) <= 2]) / len(model_class.metrics['val']['gts'])
+        model_class.writer.add_scalars('Acc_h1', {'Train': train_acc_h1, 'Validation': val_acc_h1}, epoch)
+
+        train_acc_h2 = sum([1 for gt, pred in zip(model_class.metrics['train']['gts'], model_class.metrics['train']['preds']) if hemming_dist(gt, pred) <= 1]) / len(model_class.metrics['train']['gts'])
+        val_acc_h2 = sum([1 for gt, pred in zip(model_class.metrics['val']['gts'], model_class.metrics['val']['preds']) if hemming_dist(gt, pred) <= 1]) / len(model_class.metrics['val']['gts'])
+        model_class.writer.add_scalars('Acc_h2', {'Train': train_acc_h2, 'Validation': val_acc_h2}, epoch)
 
         mean_val_loss = sum(val_losses) / len(val_losses)
         print(f"Epoch {epoch+1}, validation loss: {mean_val_loss}, train_acc: {train_acc}, val_acc: {val_acc}")

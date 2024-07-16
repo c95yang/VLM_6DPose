@@ -7,12 +7,11 @@ from torch.utils.tensorboard import SummaryWriter
 from models.adapter import MLPAdapter, TransformerAdapter
 from utils.train import train_adapter
 from utils.test import test_adapter, inference_single_image
-from utils.positions import classes, class_to_coding
+from utils.positions import classes
 # from utils.classify import classify_zeroshot, classify_fewshotshot
 
 # from BLIP.models.blip import blip_feature_extractor
 from transformers import CLIPProcessor, CLIPModel
-
 
 import os
 os.environ["TOKENIZERS_PARALLELISM"] = "false"
@@ -92,7 +91,7 @@ class VLMClassifier:
         return self.metrics
     
     def _prepare_prompt(self) -> List[str]:
-        questions = [f"a remote observed from {CLASS_NAME}" for CLASS_NAME in self.classes]
+        questions = [f"a remote observed from {CLASS_NAME}" for CLASS_NAME in classes]
         return questions
     
     def get_all_parameters(self):
@@ -102,23 +101,6 @@ class VLMClassifier:
                 for name, param in attr.named_parameters():
                     print(f"Model: {attr_name}, Parameter: {name}, Dtype: {param.dtype}, Device: {param.device}")
 
-class HammingLoss(nn.Module):
-    def __init__(self):
-        super(HammingLoss, self).__init__()
-
-    def forward(self, output, target):
-        loss = torch.tensor(0.0, device="cuda", requires_grad=True)    
-        for i in range(len(output)):
-            pred = output[i]
-            predicted_class = classes[pred]
-            tgt = target[i]
-            target_class = classes[tgt]
-            
-            pred_encoded = torch.tensor(class_to_coding[predicted_class]).cuda()
-            gt_encoded = torch.tensor(class_to_coding[target_class]).cuda()
-            loss = loss + (pred_encoded != gt_encoded).sum().float()
-        loss /= len(output)    
-        return loss
 
 if __name__ == '__main__':
 
