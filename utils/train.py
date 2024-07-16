@@ -72,6 +72,7 @@ def train_adapter(model_class, epochs, train_descriptions, val_descriptions, lam
             print("cos sim d: ", cos_sim_d)
             print(torch.nn.Softmax(dim=1)(cos_sim_d))
             cos_sim += cos_sim_d
+            cos_sim = cos_sim / cos_sim.norm(dim=-1, keepdim=True)
             print("cos sim: ", cos_sim)
             print(torch.nn.Softmax(dim=1)(cos_sim))
             predicted_classes = torch.argmax(cos_sim, dim=-1)        
@@ -124,8 +125,8 @@ def train_adapter(model_class, epochs, train_descriptions, val_descriptions, lam
             # predicted_classes = torch.argmax(cos_sim, dim=-1)
             # ##############################################################################################################
 
-            loss = model_class.criterion(cos_sim, labels.to(model_class.device))
-            # loss = model_class.criterion(predicted_classes, labels)
+            # loss = model_class.criterion(cos_sim, labels.to(model_class.device))
+            loss = model_class.criterion(predicted_classes, labels)
 
             train_loss = loss.item()
             # print(f"Train loss: {train_loss}")
@@ -197,12 +198,13 @@ def train_adapter(model_class, epochs, train_descriptions, val_descriptions, lam
                 cos_sim_d = cos_sim_d / cos_sim_d.norm(dim=-1, keepdim=True)
 
                 cos_sim += cos_sim_d
+                cos_sim = cos_sim / cos_sim.norm(dim=-1, keepdim=True)
                 print("cos sim: ", cos_sim)
                 print(torch.nn.Softmax(dim=1)(cos_sim))
                 predicted_classes = torch.argmax(cos_sim, dim=-1)        
                 ##############################################################################################################
-                val_loss = model_class.criterion(cos_sim, labels.to(model_class.device))
-                # val_loss = model_class.criterion(predicted_classes, labels)
+                # val_loss = model_class.criterion(cos_sim, labels.to(model_class.device))
+                val_loss = model_class.criterion(predicted_classes, labels)
                 val_losses.append(val_loss.item())
 
                 model_class.metrics['val']['preds'].extend(predicted_classes.cpu().tolist())

@@ -146,6 +146,8 @@ class HammingLoss(nn.Module):
 
     def forward(self, output, target):
         loss = torch.tensor(0.0, device="cuda", requires_grad=True)    
+        print("O", output)
+        print("T", target)
         for i in range(len(output)):
             pred = output[i]
             predicted_class = self.classes[pred]
@@ -177,7 +179,7 @@ if __name__ == '__main__':
         'adapter_descriptions_type': 'transformer', # 'mlp', 'transformer'
         'lr': 1e-4,
         'weight_decay': 1e-4,
-        'bs': 4, #16
+        'bs': 16, #16
     }
 
     classifier = VLMClassifier(**hparams)
