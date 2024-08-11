@@ -14,7 +14,7 @@ class Remote60(IterableDataset):
         self.is_val = is_val
         self.is_train = is_train
         self.root_dir = root_dir
-        self.desired_size = (800, 800)
+        self.desired_size = (800,800)
 
         self.descriptions_file = descriptions_file
         if self.descriptions_file is not None:
@@ -23,6 +23,7 @@ class Remote60(IterableDataset):
         self.class_to_idx = {cls: idx for idx, cls in enumerate(classes)}
 
         self.transform_train = transforms.Compose([
+            transforms.CenterCrop(400), 
             transforms.Resize(self.desired_size),
             transforms.ToTensor(),  
             transforms.RandomApply([
@@ -34,6 +35,7 @@ class Remote60(IterableDataset):
         ])
 
         self.transform = transforms.Compose([
+            transforms.CenterCrop(400),  
             transforms.Resize(self.desired_size),
             transforms.ToTensor()
         ])
@@ -76,6 +78,10 @@ class Remote60(IterableDataset):
             image = self.transform_train(image)
         else:
             image = self.transform(image)
+        # print(image.shape)
+        # img = image.cpu().numpy().transpose((1, 2, 0))
+        # plt.imshow(img)
+        # plt.show()
         return image
 
     
@@ -98,6 +104,7 @@ class Remote60_seq(Dataset):
         # print(self.class_to_idx)
 
         self.transform_train = transforms.Compose([
+            transforms.CenterCrop(int(self.desired_size * 0.8)), 
             transforms.Resize(self.desired_size),
             transforms.ToTensor(),  
             transforms.RandomApply([
@@ -109,6 +116,7 @@ class Remote60_seq(Dataset):
         ])
 
         self.transform = transforms.Compose([
+            transforms.CenterCrop(int(self.desired_size * 0.8)), 
             transforms.Resize(self.desired_size),
             transforms.ToTensor()
         ])

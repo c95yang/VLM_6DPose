@@ -2,19 +2,23 @@ from typing import List, Dict
 import torch
 import torch.nn as nn
 import torch.optim as optim
+import enum
 from torch.utils.tensorboard import SummaryWriter
 
 from models.adapter import MLPAdapter, TransformerAdapter
-from utils.train import train_adapter
+from utils.train import train
 from utils.test import test_adapter, inference_single_image
 from utils.positions import classes
+from utils.misc import HammingLoss
 # from utils.classify import classify_zeroshot, classify_fewshotshot
 
-# from BLIP.models.blip import blip_feature_extractor
-from transformers import CLIPProcessor, CLIPModel
+from BLIP.models.blip import blip_feature_extractor
+from transformers import CLIPProcessor, CLIPModel, CLIPVisionModel, CLIPImageProcessor, CLIPVisionConfig, AutoModelForCausalLM, AutoTokenizer, BitsAndBytesConfig, pipeline
 
 import os
 os.environ["TOKENIZERS_PARALLELISM"] = "false"
+
+from utils.misc import log_memory_usage
 
 class VLMClassifier:
     def __init__(self, 
@@ -30,7 +34,6 @@ class VLMClassifier:
                  lr: float, 
                  weight_decay: float,
                  image_dir: str,
-                 llava_path: str,
                  in_features: int
                  ) -> None:
         
@@ -54,24 +57,50 @@ class VLMClassifier:
 
         self.writer = SummaryWriter()
 
-        self.llava_path = llava_path
+        # quant_config = BitsAndBytesConfig(load_in_4bit=True)
 
-        clip_model_name = 'openai/clip-vit-large-patch14-336' # 'openai/clip-vit-large-patch14-336', 'openai/clip-vit-base-patch16'
-        self.clip_model = CLIPModel.from_pretrained(clip_model_name).to(device)
-        self.processor = CLIPProcessor.from_pretrained(clip_model_name)
+        # self.phi3model = AutoModelForCausalLM.from_pretrained("microsoft/Phi-3-mini-4k-instruct", trust_remote_code=True).to(device)
+        # self.phi3tokenizer = AutoTokenizer.from_pretrained("microsoft/Phi-3-mini-4k-instruct", trust_remote_code=True)
 
-        # model_url = 'https://storage.googleapis.com/sfr-vision-language-research/BLIP/models/model_base.pth'
-        # self.blip_model = blip_feature_extractor(pretrained=model_url, image_size=800, vit='base').to(device)
+        # self.phi3pipe = pipeline( 
+        #     "text-generation", 
+        #     model=self.phi3model, 
+        #     tokenizer=self.phi3tokenizer, 
+        # ) 
+
+        # messages = [ 
+        #     # {"role": "system", "content": "You are a helpful AI assistant."}, 
+        #     # {"role": "user", "content": "Can you provide ways to eat combinations of bananas and dragonfruits?"}, 
+        #     # {"role": "assistant", "content": "Sure! Here are some ways to eat bananas and dragonfruits together: 1. Banana and dragonfruit smoothie: Blend bananas and dragonfruits together with some milk and honey. 2. Banana and dragonfruit salad: Mix sliced bananas and dragonfruits together with some lemon juice and honey."}, 
+        #     {"role": "user", "content": "What about solving an 2x + 3 = 7 equation?"}, 
+        # ] 
+
+        # output = self.phi3pipe(messages, **generation_args) 
+        # print(output[0]['generated_text']) 
+
+        # clip_model_name = 'openai/clip-vit-large-patch14-336' # 'openai/clip-vit-large-patch14-336', 'openai/clip-vit-base-patch16'
+        # self.clip_model = CLIPModel.from_pretrained(clip_model_name).to(device)
+        # self.clip_processor = CLIPProcessor.from_pretrained(clip_model_name)
+
+        # self.clip_processor = CLIPImageProcessor.from_pretrained("openai/clip-vit-base-patch16")
+        # self.clip_model = CLIPVisionModel.from_pretrained("openai/clip-vit-base-patch16").to(device)
+        # self.clip_model.requires_grad_(False)
+
+        model_url = 'https://storage.googleapis.com/sfr-vision-language-research/BLIP/models/model_base.pth'
+        self.blip_model = blip_feature_extractor(pretrained=model_url, image_size=800, vit='base').to(device)
+        self.blip_model.requires_grad_(False)
+
+        self.mm_projector = nn.Linear(self.in_features, 128).to(device)
 
         if self.adapter_image_type == 'mlp':
-            self.adapter_image = MLPAdapter(in_features=self.in_features, hidden_features=512, dtype=self.dtype).to(device)
+            self.adapter_image = MLPAdapter(in_features=self.in_features, hidden_features=128, dtype=self.dtype).to(device)
         elif self.adapter_image_type == 'transformer':
-            self.adapter_image = TransformerAdapter(in_features=self.in_features, hidden_features=512, dtype=self.dtype).to(device)
+            self.adapter_image = TransformerAdapter(in_features=self.in_features, hidden_features=128, dtype=self.dtype).to(device)
 
         if self.adapter_descriptions_type == 'mlp':
-            self.adapter_descriptions = MLPAdapter(in_features=self.in_features, hidden_features=512, dtype=self.dtype).to(device)
+            self.adapter_descriptions = MLPAdapter(in_features=self.in_features, hidden_features=128, dtype=self.dtype).to(device)
         elif self.adapter_descriptions_type == 'transformer':
-            self.adapter_descriptions = TransformerAdapter(in_features=self.in_features, hidden_features=512, dtype=self.dtype).to(device)
+            self.adapter_descriptions = TransformerAdapter(in_features=self.in_features, hidden_features=128, dtype=self.dtype).to(device)
 
         self.questions = self._prepare_prompt()
         self.metrics = self._reset_metrics()
@@ -115,13 +144,13 @@ if __name__ == '__main__':
         'dtype': torch.float32,
         'image_dir': 'data/remote60',
         'in_features': 768, #512 for clip base, 768 for clip large
-        'llava_path': "llava-hf/llava-1.5-7b-hf",
+        # 'llava_path': "llava-hf/llava-1.5-7b-hf",
 
-        'adapter_image_type': 'mlp', # 'mlp', 'transformer'
+        'adapter_image_type': 'transformer', # 'mlp', 'transformer'
         'adapter_descriptions_type': 'transformer', # 'mlp', 'transformer'
-        'lr': 1e-4,
+        'lr': 1e-5,
         'weight_decay': 1e-4,
-        'bs': 16, #16
+        'bs': 8, #16
     }
 
     classifier = VLMClassifier(**hparams)
@@ -133,8 +162,18 @@ if __name__ == '__main__':
         'val_descriptions': "descriptions/val_descriptions.json",
         'lam': 1
     }
-    train_adapter(**hparams)
-    
-    # test_adapter(model_class=classifier, split='test', plot=True, fusion=False, lam=0.1)
+
+    train(**hparams)
+
+    # hparams = {
+    #     'model_class': classifier, 
+    #     'split': 'val',
+    #     'train_descriptions': "descriptions/train_descriptions.json",
+    #     'val_descriptions': "descriptions/val_descriptions.json",
+    #     'lam': 1,
+    #     'plot': False
+    # }
+
+    # test_adapter(**hparams)
     # inference_single_image(model_class=classifier, image_path='data/remote14/train/remote-comfee/BottomRightBack.png', plot=True)
 

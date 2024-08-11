@@ -61,7 +61,7 @@ class TransformerAdapter(nn.Module):
         self.hidden_features = hidden_features
         self.nhead = 8
         self.dropout = dropout
-        self.num_layers = 4
+        self.num_layers = 2
         torch.set_default_dtype(dtype)
          
         self.input_projection = nn.Sequential(

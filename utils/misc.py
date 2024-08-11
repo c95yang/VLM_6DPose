@@ -1,6 +1,34 @@
 import torch
 import torch.nn as nn
 from utils.positions import classes, class_to_coding
+import numpy as np
+
+import psutil
+import os
+import tracemalloc
+
+# Start memory trace
+# tracemalloc.start()
+
+def interpolate_color(dist, max_dist=3):
+    t = dist / max_dist
+    red = np.array([255, 0, 0])
+    green = np.array([0, 255, 0])
+    
+    color = (1 - t) * green + t * red
+    return tuple(color / 255)
+
+def log_memory_usage():
+    process = psutil.Process(os.getpid())
+    mem_info = process.memory_info()
+    print(f"RSS (Resident Set Size): {mem_info.rss / 1024 ** 2:.2f} MB")
+    print(f"VMS (Virtual Memory Size): {mem_info.vms / 1024 ** 2:.2f} MB")
+    
+    snapshot = tracemalloc.take_snapshot()
+    top_stats = snapshot.statistics('lineno')
+    print("[ Top 5 Memory Consumers ]")
+    for stat in top_stats[:5]:
+        print(stat)
 
 def parse_output(output: str) -> str:
     return output.split("ASSISTANT:")[-1].strip()
@@ -20,14 +48,12 @@ def calculate_mean_std(loader):
     print(f"Mean: {mean}, Std: {std}, loader: {loader}")
     return mean, std
 
-def hemming_dist(output, target):
-    predicted_class = classes[output]
-    target_class = classes[target]
-    
-    pred_encoded = torch.tensor(class_to_coding[predicted_class])
-    gt_encoded = torch.tensor(class_to_coding[target_class])
+def hamming_dist(gt, pred):
+    pred_class = classes[pred]
+    gt_class = classes[gt]
+    pred_encoded = torch.tensor(class_to_coding[pred_class])
+    gt_encoded = torch.tensor(class_to_coding[gt_class])
     dist = (pred_encoded != gt_encoded).sum()
-    print(f"Predicted: {predicted_class}, Target: {target_class}, Distance: {dist}")
     return dist
 
 class HammingLoss(nn.Module):
@@ -38,12 +64,7 @@ class HammingLoss(nn.Module):
         loss = torch.tensor(0.0, device="cuda", requires_grad=True)    
         for i in range(len(output)):
             pred = output[i]
-            predicted_class = classes[pred]
-            tgt = target[i]
-            target_class = classes[tgt]
-            
-            pred_encoded = torch.tensor(class_to_coding[predicted_class]).cuda()
-            gt_encoded = torch.tensor(class_to_coding[target_class]).cuda()
-            loss = loss + (pred_encoded != gt_encoded).sum().float()
+            gt = target[i]
+            loss += hamming_dist(gt, pred).float()
         loss /= len(output)    
         return loss

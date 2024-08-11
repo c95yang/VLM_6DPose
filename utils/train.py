@@ -2,9 +2,19 @@ import torch
 from tqdm import tqdm
 from utils.datasets import Remote60
 from torch.utils.data import DataLoader
-from utils.misc import HammingLoss, hemming_dist
+from utils.misc import HammingLoss, hamming_dist, log_memory_usage, interpolate_color
+import matplotlib.pyplot as plt
+import textwrap
+from utils.positions import classes
+import matplotlib.cm as cm
+import numpy as np
 
-def train_adapter(model_class, epochs, train_descriptions, val_descriptions, lam) -> None:
+def feature_select(image_forward_outs):
+    image_features = image_forward_outs.hidden_states[-1]
+    image_features = image_features[:, 1:]
+    return image_features
+
+def train(model_class, epochs, train_descriptions, val_descriptions, lam) -> None:
     train_dataset = Remote60(root_dir=model_class.image_dir, is_train=True, descriptions_file=train_descriptions)
     train_loader = DataLoader(train_dataset, batch_size=model_class.bs, pin_memory=True, num_workers=2) 
     
@@ -12,8 +22,8 @@ def train_adapter(model_class, epochs, train_descriptions, val_descriptions, lam
     val_loader = DataLoader(val_dataset, batch_size=model_class.bs, pin_memory=True, num_workers=2)
 
     best_val_loss = float('inf')
-    model_class.clip_model.eval()  
-    # model_class.blip_model.eval()
+    # model_class.clip_model.eval()  
+    model_class.blip_model.eval()
 
     for epoch in range(epochs):
         # Training loop
@@ -26,42 +36,52 @@ def train_adapter(model_class, epochs, train_descriptions, val_descriptions, lam
         for batch in tqdm(train_loader, desc=f"Epoch {epoch+1}/{epochs}"):
             images, labels, descriptions = batch
 
-            ###################### clip embeds ########################################################################
-            with torch.no_grad():
-                text_inputs = model_class.processor(text=model_class.questions, return_tensors="pt", padding=True).to(model_class.device)
-                text_features = model_class.clip_model.get_text_features(**text_inputs)
-                text_features = text_features / text_features.norm(dim=-1, keepdim=True).to(model_class.device)
-            
-                descriptions_inputs = model_class.processor(text=descriptions, return_tensors="pt", padding=True, truncation=True, max_length=77).to(model_class.device)
-                descriptions_embeds = model_class.clip_model.get_text_features(**descriptions_inputs)
-                descriptions_features = descriptions_embeds / descriptions_embeds.norm(dim=-1, keepdim=True)
-                
-                inputs = model_class.processor(images=images, return_tensors="pt", do_rescale=False).to(model_class.device)
-                image_features = model_class.clip_model.get_image_features(**inputs)
-                image_features = image_features / image_features.norm(p=2, dim=-1, keepdim=True)
-
-            image_features = model_class.adapter_image(image_features)
-            descriptions_features = model_class.adapter_descriptions(descriptions_features)
-            ##############################################################################################################
-
-            # ###################### blip embeds ########################################################################
+            # ###################### clip embeds ########################################################################
             # with torch.no_grad():
-            #     images = images.to(model_class.device)
-            #     image_features = model_class.blip_model(images, descriptions, mode='image')
-            #     image_features = image_features.mean(dim=1)
-            #     image_features = image_features / image_features.norm(p=2, dim=-1, keepdim=True).to(model_class.device)
-            # # image_features = model_class.adapter_image(image_features)
-
-            # with torch.no_grad():
-            #     descriptions_features = model_class.blip_model(images, descriptions, mode='text')
-            #     descriptions_features = descriptions_features.mean(dim=1)
-            #     descriptions_features = descriptions_features / descriptions_features.norm(p=2, dim=-1, keepdim=True).to(model_class.device)
-            # # descriptions_features = model_class.adapter_descriptions(descriptions_features)
-
-            # with torch.no_grad():
-            #     text_features = model_class.blip_model(images, model_class.questions, mode='text')[:,0]
+            #     text_inputs = model_class.clip_processor(text=model_class.questions, return_tensors="pt", padding=True).to(model_class.device)
+            #     text_features = model_class.clip_model.get_text_features(**text_inputs)
             #     text_features = text_features / text_features.norm(dim=-1, keepdim=True).to(model_class.device)
+            
+            #     descriptions_inputs = model_class.clip_processor(text=descriptions, return_tensors="pt", padding=True, truncation=True, max_length=77).to(model_class.device)
+            #     descriptions_embeds = model_class.clip_model.get_text_features(**descriptions_inputs)
+            #     descriptions_features = descriptions_embeds / descriptions_embeds.norm(dim=-1, keepdim=True)
+                
+            #     inputs = model_class.clip_processor(images=images, return_tensors="pt", do_rescale=False).to(model_class.device)
+            #     image_features = model_class.clip_model.get_image_features(**inputs)
+            #     image_features = image_features / image_features.norm(dim=-1, keepdim=True).to(model_class.device)
+
+            #     # if type(images) is list:
+            #     #     image_features = []
+            #     #     for image in images:
+            #     #         image_features = model_class.clip_model(image.to(device= model_class.device, dtype= model_class.dtype), output_hidden_states=True)
+            #     #         image_feature = feature_select(image_features).to(image.dtype)
+            #     #         image_features.append(image_feature)
+            #     # else:
+            #     #     image_features = model_class.clip_model(images.to(device= model_class.device, dtype= model_class.dtype), output_hidden_states=True)
+            #     #     image_features = feature_select(image_features).to(images.dtype)
+
+            # image_features = model_class.adapter_image(image_features)
+            # descriptions_features = model_class.adapter_descriptions(descriptions_features)
             # ##############################################################################################################
+
+            ###################### blip embeds ########################################################################
+            with torch.no_grad():
+                images = images.to(model_class.device)
+                image_features = model_class.blip_model(images, descriptions, mode='image')
+                image_features = image_features.mean(dim=1)
+                image_features = image_features / image_features.norm(p=2, dim=-1, keepdim=True).to(model_class.device)
+            image_features = model_class.adapter_image(image_features)
+
+            with torch.no_grad():
+                descriptions_features = model_class.blip_model(images, descriptions, mode='text')
+                descriptions_features = descriptions_features.mean(dim=1)
+                descriptions_features = descriptions_features / descriptions_features.norm(p=2, dim=-1, keepdim=True).to(model_class.device)
+            descriptions_features = model_class.adapter_descriptions(descriptions_features)
+
+            with torch.no_grad():
+                text_features = model_class.blip_model(images, model_class.questions, mode='text')[:,0]
+                text_features = text_features / text_features.norm(dim=-1, keepdim=True).to(model_class.device)
+            ##############################################################################################################
 
             ###################### Cosine Similarity fusion ##############################################################
             cos_sim = torch.nn.functional.cosine_similarity(image_features.unsqueeze(1), text_features.unsqueeze(0), dim=2)
@@ -79,24 +99,42 @@ def train_adapter(model_class, epochs, train_descriptions, val_descriptions, lam
             predicted_classes = torch.argmax(cos_sim, dim=-1)        
             ##############################################################################################################
 
-            # ###################### llava approach ##############################################################
-            # projected_image_features = model_class.adapter_image(image_features)
-            # min_val = projected_image_features.min().item()
-            # max_val = projected_image_features.max().item()
-            # projected_image_features = (projected_image_features - min_val) / (max_val - min_val)
-            # projected_image_features = projected_image_features * 10000
-            # projected_image_features = projected_image_features.long()
+            ###################### llava approach ##############################################################
+            # image_tokens = model_class.mm_projector(image_features[0])
 
-            # image_inputs = {"input_ids": projected_image_features, "attention_mask": torch.ones_like(projected_image_features)}
+            # messages = [ 
+            #     {"role": "system", "content": "You are a helpful AI assistant."}, 
+            #     {"role": "user", "content": "Describe the romote in the image."}, 
+            #     {"role": "assistant", "content": descriptions[0]},
+            #     {"role": "user", "content": "What is the orientation of the remote?"}, 
+            # ] 
 
-            # combined_inputs = {}
-            # combined_inputs["input_ids"] = torch.cat([image_inputs["input_ids"], descriptions_inputs["input_ids"]], dim=1)
-            # combined_inputs["attention_mask"] = torch.cat([image_inputs["attention_mask"], descriptions_inputs["attention_mask"]], dim=1)
-            # print(combined_inputs["input_ids"])
+            # input_text = ""
+            # for message in messages:
+            #     input_text += f"{message['role']}: {message['content']}\n"
 
-            # tokens = model_class.clip_model.get_text_features(**combined_inputs)
-            # tokens = tokens / tokens.norm(dim=-1, keepdim=True).to(model_class.device)
-            # tokens = model_class.adapter_descriptions(tokens)
+            # input_ids = model_class.phi3tokenizer(input_text, return_tensors="pt").to("cuda")
+            # print(input_ids)
+
+            # generation_args = {
+            #     "max_new_tokens": 100,
+            #     "temperature": 0.0,
+            #     "do_sample": False,
+            # }
+
+            # input_ids = torch.cat((input_ids, image_tokens),dim=1)
+            # print(input_ids)
+
+            # with torch.no_grad():
+            #     output_ids = model_class.phi3model.generate(input_ids, **generation_args)
+
+            # print(output_ids)
+
+            # output_text = model_class.phi3tokenizer.decode(output_ids[0], skip_special_tokens=True)
+
+            # print(output_text[len(input_text):]) 
+
+            # # print(model_class.phi3model.decoder.layers[-1].final_layer_norm.weight.dtype)
 
             # # cos_sim = torch.nn.functional.cosine_similarity(tokens.unsqueeze(1), text_features.unsqueeze(0), dim=2)
             # tokens = torch.nn.functional.normalize(tokens, p=2, dim=-1)
@@ -105,7 +143,7 @@ def train_adapter(model_class, epochs, train_descriptions, val_descriptions, lam
             # print(cos_sim)
             # print(torch.nn.Softmax(dim=1)(cos_sim))
             # predicted_classes = torch.argmax(cos_sim, dim=-1)  
-            # ##############################################################################################################
+            ##############################################################################################################
 
             # ###################### blip multimodal ########################################################################
             # with torch.no_grad():
@@ -144,7 +182,6 @@ def train_adapter(model_class, epochs, train_descriptions, val_descriptions, lam
             model_class.metrics['train']['preds'].extend(predicted_classes.cpu().tolist())
             model_class.metrics['train']['gts'].extend(labels.cpu().tolist())
 
-        torch.cuda.empty_cache()
         # Validation loop
         model_class.adapter_image.eval() 
         model_class.adapter_descriptions.eval() 
@@ -152,57 +189,45 @@ def train_adapter(model_class, epochs, train_descriptions, val_descriptions, lam
         with torch.no_grad():
             for batch in tqdm(val_loader, desc=f"Validation {epoch+1}/{epochs}"):
                 images, labels, descriptions = batch
-                
-                ###################### clip embeds ########################################################################
-                with torch.no_grad():
-                    text_inputs = model_class.processor(text=model_class.questions, return_tensors="pt", padding=True).to(model_class.device)
-                    text_features = model_class.clip_model.get_text_features(**text_inputs)
-                    text_features = text_features / text_features.norm(dim=-1, keepdim=True).to(model_class.device)
-                
-                    descriptions_inputs = model_class.processor(text=descriptions, return_tensors="pt", padding=True, truncation=True, max_length=77).to(model_class.device)
-                    descriptions_embeds = model_class.clip_model.get_text_features(**descriptions_inputs)
-                    descriptions_features = descriptions_embeds / descriptions_embeds.norm(dim=-1, keepdim=True)
-                    
-                    inputs = model_class.processor(images=images, return_tensors="pt", do_rescale=False).to(model_class.device)
-                    image_features = model_class.clip_model.get_image_features(**inputs)
-                    image_features = image_features / image_features.norm(p=2, dim=-1, keepdim=True)
+                #########################  START  ##########################################################################
 
+                ###################### blip embeds ########################################################################
+                with torch.no_grad():
+                    images = images.to(model_class.device)
+                    image_features = model_class.blip_model(images, descriptions, mode='image')
+                    image_features = image_features.mean(dim=1)
+                    image_features = image_features / image_features.norm(p=2, dim=-1, keepdim=True).to(model_class.device)
                 image_features = model_class.adapter_image(image_features)
+
+                with torch.no_grad():
+                    descriptions_features = model_class.blip_model(images, descriptions, mode='text')
+                    descriptions_features = descriptions_features.mean(dim=1)
+                    descriptions_features = descriptions_features / descriptions_features.norm(p=2, dim=-1, keepdim=True).to(model_class.device)
                 descriptions_features = model_class.adapter_descriptions(descriptions_features)
+
+                with torch.no_grad():
+                    text_features = model_class.blip_model(images, model_class.questions, mode='text')[:,0]
+                    text_features = text_features / text_features.norm(dim=-1, keepdim=True).to(model_class.device)
                 ##############################################################################################################
 
-                # ###################### blip embeds ########################################################################
-                # with torch.no_grad():
-                #     images = images.to(model_class.device)
-                #     image_features = model_class.blip_model(images, descriptions, mode='image')
-                #     image_features = image_features.mean(dim=1)
-                #     image_features = image_features / image_features.norm(p=2, dim=-1, keepdim=True).to(model_class.device)
-                # # image_features = model_class.adapter_image(image_features)
-
-                # with torch.no_grad():
-                #     descriptions_features = model_class.blip_model(images, descriptions, mode='text')
-                #     descriptions_features = descriptions_features.mean(dim=1)
-                #     descriptions_features = descriptions_features / descriptions_features.norm(p=2, dim=-1, keepdim=True).to(model_class.device)
-                # # descriptions_features = model_class.adapter_descriptions(descriptions_features)
-
-                # with torch.no_grad():
-                #     text_features = model_class.blip_model(images, model_class.questions, mode='text')[:,0]
-                #     text_features = text_features / text_features.norm(dim=-1, keepdim=True).to(model_class.device)
-                # ##############################################################################################################
 
                 ###################### Cosine Similarity fusion ##############################################################
                 cos_sim = torch.nn.functional.cosine_similarity(image_features.unsqueeze(1), text_features.unsqueeze(0), dim=2)
                 cos_sim = cos_sim / cos_sim.norm(dim=-1, keepdim=True)
-
+                # print("image cos sim: ", cos_sim)
+                # print(torch.nn.Softmax(dim=1)(cos_sim))
                 cos_sim_d = lam * torch.nn.functional.cosine_similarity(descriptions_features.unsqueeze(1), text_features.unsqueeze(0), dim=2)
                 cos_sim_d = cos_sim_d / cos_sim_d.norm(dim=-1, keepdim=True)
-
+                # print("cos sim d: ", cos_sim_d)
+                # print(torch.nn.Softmax(dim=1)(cos_sim_d))
                 cos_sim += cos_sim_d
                 cos_sim = cos_sim / cos_sim.norm(dim=-1, keepdim=True)
                 # print("cos sim: ", cos_sim)
                 # print(torch.nn.Softmax(dim=1)(cos_sim))
                 predicted_classes = torch.argmax(cos_sim, dim=-1)        
                 ##############################################################################################################
+
+                ###############################  END  ########################################################################
                 val_loss = model_class.criterion(cos_sim, labels.to(model_class.device))
                 # val_loss = model_class.criterion(predicted_classes, labels)
                 val_losses.append(val_loss.item())
@@ -210,20 +235,55 @@ def train_adapter(model_class, epochs, train_descriptions, val_descriptions, lam
                 model_class.metrics['val']['preds'].extend(predicted_classes.cpu().tolist())
                 model_class.metrics['val']['gts'].extend(labels.cpu().tolist())
 
+                plot = (epoch + 1) % 100 == 0
+                if plot:
+                    num_images = len(images) 
+                    num_rows = 2
+                    num_cols = 8
+
+                    fig, axes = plt.subplots(nrows=num_rows, ncols=num_cols, figsize=(30, 30))  
+                    for ax_row in axes:
+                        for ax in ax_row:
+                            ax.axis('off')
+
+                    for i in range(num_images):
+                        img = images[i].cpu().numpy().transpose((1, 2, 0))
+                        pred = predicted_classes[i]
+                        gt = labels[i]
+
+                        pred_class = classes[pred]  
+                        gt_class = classes[gt]  
+
+                        row = i // num_cols  
+                        col = i % num_cols  
+                        ax = axes[row, col]  
+                        ax.imshow(img)
+
+                        hamming_distance = hamming_dist(pred, gt).item()
+                        color = interpolate_color(hamming_distance)
+
+                        ax.set_title(gt_class, fontsize=15, color="black", pad=1)
+                        ax.text(0.5, -0.02, pred_class, transform=ax.transAxes, ha='center', va='top', fontsize=15, color=color)
+                        wrapped_text = "\n".join(textwrap.wrap(f"d = {hamming_dist(pred, gt)}", width=25))
+                        ax.text(0.5, -0.2, wrapped_text, transform=ax.transAxes, ha='center', va='top', fontsize=15, color=color)
+
+                    plt.show()
+
         train_acc = sum([1 for gt, pred in zip(model_class.metrics['train']['gts'], model_class.metrics['train']['preds']) if gt == pred]) / len(model_class.metrics['train']['gts'])
         val_acc = sum([1 for gt, pred in zip(model_class.metrics['val']['gts'], model_class.metrics['val']['preds']) if gt == pred]) / len(model_class.metrics['val']['gts'])
         model_class.writer.add_scalars('Acc', {'Train': train_acc, 'Validation': val_acc}, epoch)
 
-        train_acc_h1 = sum([1 for gt, pred in zip(model_class.metrics['train']['gts'], model_class.metrics['train']['preds']) if hemming_dist(gt, pred) <= 2]) / len(model_class.metrics['train']['gts'])
-        val_acc_h1 = sum([1 for gt, pred in zip(model_class.metrics['val']['gts'], model_class.metrics['val']['preds']) if hemming_dist(gt, pred) <= 2]) / len(model_class.metrics['val']['gts'])
+        train_acc_h1 = sum([1 for gt, pred in zip(model_class.metrics['train']['gts'], model_class.metrics['train']['preds']) if hamming_dist(gt, pred) <= 2]) / len(model_class.metrics['train']['gts'])
+        val_acc_h1 = sum([1 for gt, pred in zip(model_class.metrics['val']['gts'], model_class.metrics['val']['preds']) if hamming_dist(gt, pred) <= 2]) / len(model_class.metrics['val']['gts'])
         model_class.writer.add_scalars('Acc_h1', {'Train': train_acc_h1, 'Validation': val_acc_h1}, epoch)
 
-        train_acc_h2 = sum([1 for gt, pred in zip(model_class.metrics['train']['gts'], model_class.metrics['train']['preds']) if hemming_dist(gt, pred) <= 1]) / len(model_class.metrics['train']['gts'])
-        val_acc_h2 = sum([1 for gt, pred in zip(model_class.metrics['val']['gts'], model_class.metrics['val']['preds']) if hemming_dist(gt, pred) <= 1]) / len(model_class.metrics['val']['gts'])
+        train_acc_h2 = sum([1 for gt, pred in zip(model_class.metrics['train']['gts'], model_class.metrics['train']['preds']) if hamming_dist(gt, pred) <= 1]) / len(model_class.metrics['train']['gts'])
+        val_acc_h2 = sum([1 for gt, pred in zip(model_class.metrics['val']['gts'], model_class.metrics['val']['preds']) if hamming_dist(gt, pred) <= 1]) / len(model_class.metrics['val']['gts'])
         model_class.writer.add_scalars('Acc_h2', {'Train': train_acc_h2, 'Validation': val_acc_h2}, epoch)
 
         mean_val_loss = sum(val_losses) / len(val_losses)
         print(f"Epoch {epoch+1}, validation loss: {mean_val_loss}, train_acc: {train_acc}, val_acc: {val_acc}")
+
 
         if mean_val_loss < best_val_loss:
             best_val_loss = mean_val_loss
