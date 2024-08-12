@@ -271,15 +271,15 @@ def train(model_class, epochs, train_descriptions, val_descriptions, lam) -> Non
 
         train_acc = sum([1 for gt, pred in zip(model_class.metrics['train']['gts'], model_class.metrics['train']['preds']) if gt == pred]) / len(model_class.metrics['train']['gts'])
         val_acc = sum([1 for gt, pred in zip(model_class.metrics['val']['gts'], model_class.metrics['val']['preds']) if gt == pred]) / len(model_class.metrics['val']['gts'])
-        model_class.writer.add_scalars('Acc', {'Train': train_acc, 'Validation': val_acc}, epoch)
-
-        train_acc_h1 = sum([1 for gt, pred in zip(model_class.metrics['train']['gts'], model_class.metrics['train']['preds']) if hamming_dist(gt, pred) <= 2]) / len(model_class.metrics['train']['gts'])
-        val_acc_h1 = sum([1 for gt, pred in zip(model_class.metrics['val']['gts'], model_class.metrics['val']['preds']) if hamming_dist(gt, pred) <= 2]) / len(model_class.metrics['val']['gts'])
-        model_class.writer.add_scalars('Acc_h1', {'Train': train_acc_h1, 'Validation': val_acc_h1}, epoch)
+        model_class.writer.add_scalars('Acc_3', {'Train': train_acc, 'Validation': val_acc}, epoch)
 
         train_acc_h2 = sum([1 for gt, pred in zip(model_class.metrics['train']['gts'], model_class.metrics['train']['preds']) if hamming_dist(gt, pred) <= 1]) / len(model_class.metrics['train']['gts'])
         val_acc_h2 = sum([1 for gt, pred in zip(model_class.metrics['val']['gts'], model_class.metrics['val']['preds']) if hamming_dist(gt, pred) <= 1]) / len(model_class.metrics['val']['gts'])
-        model_class.writer.add_scalars('Acc_h2', {'Train': train_acc_h2, 'Validation': val_acc_h2}, epoch)
+        model_class.writer.add_scalars('Acc_2', {'Train': train_acc_h2, 'Validation': val_acc_h2}, epoch)
+
+        train_acc_h1 = sum([1 for gt, pred in zip(model_class.metrics['train']['gts'], model_class.metrics['train']['preds']) if hamming_dist(gt, pred) <= 2]) / len(model_class.metrics['train']['gts'])
+        val_acc_h1 = sum([1 for gt, pred in zip(model_class.metrics['val']['gts'], model_class.metrics['val']['preds']) if hamming_dist(gt, pred) <= 2]) / len(model_class.metrics['val']['gts'])
+        model_class.writer.add_scalars('Acc_1', {'Train': train_acc_h1, 'Validation': val_acc_h1}, epoch)
 
         mean_val_loss = sum(val_losses) / len(val_losses)
         print(f"Epoch {epoch+1}, validation loss: {mean_val_loss}, train_acc: {train_acc}, val_acc: {val_acc}")

@@ -148,7 +148,7 @@ if __name__ == '__main__':
 
         'adapter_image_type': 'transformer', # 'mlp', 'transformer'
         'adapter_descriptions_type': 'transformer', # 'mlp', 'transformer'
-        'lr': 1e-5,
+        'lr': 1e-6,
         'weight_decay': 1e-4,
         'bs': 8, #16
     }

@@ -12,4 +12,4 @@ python VLMClassifier.py
 ~~~
 
 ## Architecture
-![Architecture](./diagrams/architecture2.svg)
+![Architecture](./diagrams/architecture.svg)
