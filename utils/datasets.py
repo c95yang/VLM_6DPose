@@ -23,7 +23,7 @@ class Remote60(IterableDataset):
         self.class_to_idx = {cls: idx for idx, cls in enumerate(classes)}
 
         self.transform_train = transforms.Compose([
-            transforms.CenterCrop(400), 
+            # transforms.CenterCrop((int(self.desired_size[0] * 0.5), int(self.desired_size[1] * 0.5))),
             transforms.Resize(self.desired_size),
             transforms.ToTensor(),  
             transforms.RandomApply([
@@ -35,7 +35,7 @@ class Remote60(IterableDataset):
         ])
 
         self.transform = transforms.Compose([
-            transforms.CenterCrop(400),  
+            # transforms.CenterCrop((int(self.desired_size[0] * 0.5), int(self.desired_size[1] * 0.5))), 
             transforms.Resize(self.desired_size),
             transforms.ToTensor()
         ])
@@ -49,18 +49,22 @@ class Remote60(IterableDataset):
         path = self.get_data_path()
         for subdir, _, files in os.walk(path):
             for file in files:
-                if file.endswith('.png'):
+                if file.endswith('.png') or file.endswith('.jpeg'):
                     img_path = os.path.join(subdir, file)
-                    label = assign_label(file)
-
                     image = self.load_image(img_path)
-                    label_coding = self.class_to_idx[label]
 
-                    if self.descriptions_file is not None:
+                    if self.is_test:
                         description = self.descriptions[img_path]
-                        yield image, label_coding, description
+                        yield image, description
                     else:
-                        yield image, label_coding
+                        label = assign_label(file)
+                        label_coding = self.class_to_idx[label]
+
+                        if self.descriptions_file is not None:
+                            description = self.descriptions[img_path]
+                            yield image, label_coding, description
+                        else:
+                            yield image, label_coding
 
     def get_data_path(self):
         if self.is_val:
@@ -78,7 +82,6 @@ class Remote60(IterableDataset):
             image = self.transform_train(image)
         else:
             image = self.transform(image)
-        # print(image.shape)
         # img = image.cpu().numpy().transpose((1, 2, 0))
         # plt.imshow(img)
         # plt.show()
@@ -104,7 +107,7 @@ class Remote60_seq(Dataset):
         # print(self.class_to_idx)
 
         self.transform_train = transforms.Compose([
-            transforms.CenterCrop(int(self.desired_size * 0.8)), 
+            transforms.CenterCrop((int(self.desired_size[0] * 0.95), int(self.desired_size[1] * 0.95))),
             transforms.Resize(self.desired_size),
             transforms.ToTensor(),  
             transforms.RandomApply([
@@ -116,7 +119,7 @@ class Remote60_seq(Dataset):
         ])
 
         self.transform = transforms.Compose([
-            transforms.CenterCrop(int(self.desired_size * 0.8)), 
+            # transforms.CenterCrop((int(self.desired_size[0] * 1), int(self.desired_size[1] * 1))),
             transforms.Resize(self.desired_size),
             transforms.ToTensor()
         ])
@@ -133,7 +136,7 @@ class Remote60_seq(Dataset):
             
         for subdir, _, files in os.walk(path):
             for file in files:
-                if file.endswith('.png'):
+                if file.endswith('.png') or file.endswith('.jpeg'):
                     img_path = os.path.join(subdir, file)
                     label = assign_label(file)
 
@@ -152,8 +155,6 @@ class Remote60_seq(Dataset):
         img_path = self.image_paths[idx]
 
         label = self.labels[idx]
-        if '_rot' in label:
-            label = label.split('_rot')[0]
 
         image = Image.open(img_path).convert("RGB")
         image = self.transform(image)

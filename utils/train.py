@@ -6,98 +6,106 @@ from utils.misc import HammingLoss, hamming_dist, log_memory_usage, interpolate_
 import matplotlib.pyplot as plt
 import textwrap
 from utils.positions import classes
-import matplotlib.cm as cm
-import numpy as np
 
 def feature_select(image_forward_outs):
     image_features = image_forward_outs.hidden_states[-1]
     image_features = image_features[:, 1:]
     return image_features
 
-def train(model_class, epochs, train_descriptions, val_descriptions, lam) -> None:
+def train(model_class, epochs, train_descriptions, val_descriptions, lam, zeroshot) -> None:
+    fusion = model_class.fusion
     train_dataset = Remote60(root_dir=model_class.image_dir, is_train=True, descriptions_file=train_descriptions)
     train_loader = DataLoader(train_dataset, batch_size=model_class.bs, pin_memory=True, num_workers=2) 
     
     val_dataset = Remote60(root_dir=model_class.image_dir, is_val=True, descriptions_file=val_descriptions)
-    val_loader = DataLoader(val_dataset, batch_size=model_class.bs, pin_memory=True, num_workers=2)
+    val_loader = DataLoader(val_dataset, batch_size=model_class.bs, pin_memory=True, num_workers=2, shuffle=False)
 
     best_val_loss = float('inf')
-    # model_class.clip_model.eval()  
-    model_class.blip_model.eval()
+    if model_class.embedder == 'clip':
+        model_class.clip_model.eval()  
+    elif model_class.embedder == 'blip':
+        model_class.blip_model.eval()
 
     for epoch in range(epochs):
         # Training loop
         model_class.adapter_image.train()
-        model_class.adapter_descriptions.train()
-
         model_class.optimizer_image.zero_grad()
-        model_class.optimizer_descriptions.zero_grad()
+
+        if fusion:
+            model_class.adapter_descriptions.train()
+            model_class.optimizer_descriptions.zero_grad()
+
+        with torch.no_grad():
+            if model_class.embedder == 'clip':
+                text_inputs = model_class.clip_processor(text=model_class.questions, return_tensors="pt", padding=True).to(model_class.device)
+                text_features = model_class.clip_model.get_text_features(**text_inputs)
+                text_features = text_features / text_features.norm(dim=-1, keepdim=True).to(model_class.device)
+            elif model_class.embedder == 'blip':
+                text_features = model_class.blip_model(images, model_class.questions, mode='text')[:,0]
+                text_features = text_features / text_features.norm(dim=-1, keepdim=True).to(model_class.device)
 
         for batch in tqdm(train_loader, desc=f"Epoch {epoch+1}/{epochs}"):
             images, labels, descriptions = batch
 
-            # ###################### clip embeds ########################################################################
-            # with torch.no_grad():
-            #     text_inputs = model_class.clip_processor(text=model_class.questions, return_tensors="pt", padding=True).to(model_class.device)
-            #     text_features = model_class.clip_model.get_text_features(**text_inputs)
-            #     text_features = text_features / text_features.norm(dim=-1, keepdim=True).to(model_class.device)
-            
-            #     descriptions_inputs = model_class.clip_processor(text=descriptions, return_tensors="pt", padding=True, truncation=True, max_length=77).to(model_class.device)
-            #     descriptions_embeds = model_class.clip_model.get_text_features(**descriptions_inputs)
-            #     descriptions_features = descriptions_embeds / descriptions_embeds.norm(dim=-1, keepdim=True)
-                
-            #     inputs = model_class.clip_processor(images=images, return_tensors="pt", do_rescale=False).to(model_class.device)
-            #     image_features = model_class.clip_model.get_image_features(**inputs)
-            #     image_features = image_features / image_features.norm(dim=-1, keepdim=True).to(model_class.device)
+            if model_class.embedder == 'clip':
+                with torch.no_grad():
+                    if fusion:
+                        descriptions_inputs = model_class.clip_processor(text=descriptions, return_tensors="pt", padding=True, truncation=True, max_length=77).to(model_class.device)
+                        descriptions_embeds = model_class.clip_model.get_text_features(**descriptions_inputs)
+                        descriptions_features = descriptions_embeds / descriptions_embeds.norm(dim=-1, keepdim=True)
+                    
+                    inputs = model_class.clip_processor(images=images, return_tensors="pt", do_rescale=False).to(model_class.device)
+                    image_features = model_class.clip_model.get_image_features(**inputs)
+                    image_features = image_features / image_features.norm(dim=-1, keepdim=True).to(model_class.device)
 
-            #     # if type(images) is list:
-            #     #     image_features = []
-            #     #     for image in images:
-            #     #         image_features = model_class.clip_model(image.to(device= model_class.device, dtype= model_class.dtype), output_hidden_states=True)
-            #     #         image_feature = feature_select(image_features).to(image.dtype)
-            #     #         image_features.append(image_feature)
-            #     # else:
-            #     #     image_features = model_class.clip_model(images.to(device= model_class.device, dtype= model_class.dtype), output_hidden_states=True)
-            #     #     image_features = feature_select(image_features).to(images.dtype)
+                if not zeroshot:
+                    image_features = model_class.adapter_image(image_features)
+                    if fusion:
+                        descriptions_features = model_class.adapter_descriptions(descriptions_features)
 
-            # image_features = model_class.adapter_image(image_features)
-            # descriptions_features = model_class.adapter_descriptions(descriptions_features)
-            # ##############################################################################################################
+            elif model_class.embedder == 'blip':
+                with torch.no_grad():
+                    images = images.to(model_class.device)
+                    image_features = model_class.blip_model(images, descriptions, mode='image')
+                    image_features = image_features.mean(dim=1)
+                    image_features = image_features / image_features.norm(p=2, dim=-1, keepdim=True).to(model_class.device)
+                    if fusion:
+                        descriptions_features = model_class.blip_model(images, descriptions, mode='text')
+                        descriptions_features = descriptions_features.mean(dim=1)
+                        descriptions_features = descriptions_features / descriptions_features.norm(p=2, dim=-1, keepdim=True).to(model_class.device)
 
-            ###################### blip embeds ########################################################################
-            with torch.no_grad():
-                images = images.to(model_class.device)
-                image_features = model_class.blip_model(images, descriptions, mode='image')
-                image_features = image_features.mean(dim=1)
-                image_features = image_features / image_features.norm(p=2, dim=-1, keepdim=True).to(model_class.device)
-            image_features = model_class.adapter_image(image_features)
+                    if not zeroshot:
+                        image_features = model_class.adapter_image(image_features)
+                        if fusion:
+                            descriptions_features = model_class.adapter_descriptions(descriptions_features)
 
-            with torch.no_grad():
-                descriptions_features = model_class.blip_model(images, descriptions, mode='text')
-                descriptions_features = descriptions_features.mean(dim=1)
-                descriptions_features = descriptions_features / descriptions_features.norm(p=2, dim=-1, keepdim=True).to(model_class.device)
-            descriptions_features = model_class.adapter_descriptions(descriptions_features)
-
-            with torch.no_grad():
-                text_features = model_class.blip_model(images, model_class.questions, mode='text')[:,0]
-                text_features = text_features / text_features.norm(dim=-1, keepdim=True).to(model_class.device)
-            ##############################################################################################################
-
-            ###################### Cosine Similarity fusion ##############################################################
+            ###################### Cosine Similarity ##############################################################
             cos_sim = torch.nn.functional.cosine_similarity(image_features.unsqueeze(1), text_features.unsqueeze(0), dim=2)
             cos_sim = cos_sim / cos_sim.norm(dim=-1, keepdim=True)
-            # print("image cos sim: ", cos_sim)
-            # print(torch.nn.Softmax(dim=1)(cos_sim))
-            cos_sim_d = lam * torch.nn.functional.cosine_similarity(descriptions_features.unsqueeze(1), text_features.unsqueeze(0), dim=2)
-            cos_sim_d = cos_sim_d / cos_sim_d.norm(dim=-1, keepdim=True)
-            # print("cos sim d: ", cos_sim_d)
-            # print(torch.nn.Softmax(dim=1)(cos_sim_d))
-            cos_sim += cos_sim_d
-            cos_sim = cos_sim / cos_sim.norm(dim=-1, keepdim=True)
-            # print("cos sim: ", cos_sim)
-            # print(torch.nn.Softmax(dim=1)(cos_sim))
+
+            if fusion:
+                cos_sim_d = lam * torch.nn.functional.cosine_similarity(descriptions_features.unsqueeze(1), text_features.unsqueeze(0), dim=2)
+                cos_sim_d = cos_sim_d / cos_sim_d.norm(dim=-1, keepdim=True)
+
+                cos_sim += cos_sim_d
+                cos_sim = cos_sim / cos_sim.norm(dim=-1, keepdim=True)
+
             predicted_classes = torch.argmax(cos_sim, dim=-1)        
             ##############################################################################################################
+
+            # ###################### blip multimodal ########################################################################
+            # with torch.no_grad():
+            #     images = images.to(model_class.device)
+            #     multimodal_features = model_class.blip_model(images, descriptions, mode='multimodal')
+            #     multimodal_features = multimodal_features.mean(dim=1)
+            #     multimodal_features = multimodal_features / multimodal_features.norm(p=2, dim=-1, keepdim=True).to(model_class.device)
+            # multimodal_features = model_class.adapter_image(multimodal_features)
+
+            # cos_sim = torch.nn.functional.cosine_similarity(multimodal_features.unsqueeze(1), text_features.unsqueeze(0), dim=2)
+            # print(cos_sim)
+            # print(torch.nn.Softmax(dim=1)(cos_sim))
+            # predicted_classes = torch.argmax(cos_sim, dim=-1)
+            # ##############################################################################################################
 
             ###################### llava approach ##############################################################
             # image_tokens = model_class.mm_projector(image_features[0])
@@ -145,89 +153,80 @@ def train(model_class, epochs, train_descriptions, val_descriptions, lam) -> Non
             # predicted_classes = torch.argmax(cos_sim, dim=-1)  
             ##############################################################################################################
 
-            # ###################### blip multimodal ########################################################################
-            # with torch.no_grad():
-            #     images = images.to(model_class.device)
-            #     multimodal_features = model_class.blip_model(images, descriptions, mode='multimodal')
-            #     multimodal_features = multimodal_features.mean(dim=1)
-            #     multimodal_features = multimodal_features / multimodal_features.norm(p=2, dim=-1, keepdim=True).to(model_class.device)
-            # multimodal_features = model_class.adapter_image(multimodal_features)
-
-            # with torch.no_grad():
-            #     text_features = model_class.blip_model(images, model_class.questions, mode='text')
-            #     text_features = text_features.mean(dim=1)
-            #     text_features = text_features / text_features.norm(dim=-1, keepdim=True).to(model_class.device)
-
-            # cos_sim = torch.nn.functional.cosine_similarity(multimodal_features.unsqueeze(1), text_features.unsqueeze(0), dim=2)
-            # print(cos_sim)
-            # print(torch.nn.Softmax(dim=1)(cos_sim))
-            # predicted_classes = torch.argmax(cos_sim, dim=-1)
-            # ##############################################################################################################
-
             loss = model_class.criterion(cos_sim, labels.to(model_class.device))
-            # loss = model_class.criterion(predicted_classes, labels)
+            # val_loss = model_class.criterion(predicted_classes, labels)
             train_loss = loss.item()
-            # print(f"Train loss: {train_loss}")
-            loss.backward()
 
-            model_class.optimizer_image.step()
-            model_class.optimizer_descriptions.step()
+            if not zeroshot:
+                loss.backward()
 
-            model_class.scheduler_image.step()
-            model_class.scheduler_descriptions.step()
+                model_class.optimizer_image.step()
+                model_class.scheduler_image.step()
+                model_class.optimizer_image.zero_grad()
 
-            model_class.optimizer_image.zero_grad()
-            model_class.optimizer_descriptions.zero_grad()
+                if fusion:
+                    model_class.optimizer_descriptions.step()
+                    model_class.scheduler_descriptions.step()
+                    model_class.optimizer_descriptions.zero_grad()
 
             model_class.metrics['train']['preds'].extend(predicted_classes.cpu().tolist())
             model_class.metrics['train']['gts'].extend(labels.cpu().tolist())
 
         # Validation loop
         model_class.adapter_image.eval() 
-        model_class.adapter_descriptions.eval() 
+        if fusion:
+            model_class.adapter_descriptions.eval() 
         val_losses = []
         with torch.no_grad():
             for batch in tqdm(val_loader, desc=f"Validation {epoch+1}/{epochs}"):
                 images, labels, descriptions = batch
-                #########################  START  ##########################################################################
 
-                ###################### blip embeds ########################################################################
-                with torch.no_grad():
-                    images = images.to(model_class.device)
-                    image_features = model_class.blip_model(images, descriptions, mode='image')
-                    image_features = image_features.mean(dim=1)
-                    image_features = image_features / image_features.norm(p=2, dim=-1, keepdim=True).to(model_class.device)
-                image_features = model_class.adapter_image(image_features)
+                if model_class.embedder == 'clip':
+                    with torch.no_grad():
+                        if fusion:
+                            descriptions_inputs = model_class.clip_processor(text=descriptions, return_tensors="pt", padding=True, truncation=True, max_length=77).to(model_class.device)
+                            descriptions_embeds = model_class.clip_model.get_text_features(**descriptions_inputs)
+                            descriptions_features = descriptions_embeds / descriptions_embeds.norm(dim=-1, keepdim=True)
+                        
+                        inputs = model_class.clip_processor(images=images, return_tensors="pt", do_rescale=False).to(model_class.device)
+                        image_features = model_class.clip_model.get_image_features(**inputs)
+                        image_features = image_features / image_features.norm(dim=-1, keepdim=True).to(model_class.device)
 
-                with torch.no_grad():
-                    descriptions_features = model_class.blip_model(images, descriptions, mode='text')
-                    descriptions_features = descriptions_features.mean(dim=1)
-                    descriptions_features = descriptions_features / descriptions_features.norm(p=2, dim=-1, keepdim=True).to(model_class.device)
-                descriptions_features = model_class.adapter_descriptions(descriptions_features)
+                    if not zeroshot:
+                        image_features = model_class.adapter_image(image_features)
+                        if fusion:
+                            descriptions_features = model_class.adapter_descriptions(descriptions_features)
 
-                with torch.no_grad():
-                    text_features = model_class.blip_model(images, model_class.questions, mode='text')[:,0]
-                    text_features = text_features / text_features.norm(dim=-1, keepdim=True).to(model_class.device)
-                ##############################################################################################################
+                elif model_class.embedder == 'blip':
+                    with torch.no_grad():
+                        images = images.to(model_class.device)
+                        image_features = model_class.blip_model(images, descriptions, mode='image')
+                        image_features = image_features.mean(dim=1)
+                        image_features = image_features / image_features.norm(p=2, dim=-1, keepdim=True).to(model_class.device)
+                        if fusion:
+                            descriptions_features = model_class.blip_model(images, descriptions, mode='text')
+                            descriptions_features = descriptions_features.mean(dim=1)
+                            descriptions_features = descriptions_features / descriptions_features.norm(p=2, dim=-1, keepdim=True).to(model_class.device)
 
+                        if not zeroshot:
+                            image_features = model_class.adapter_image(image_features)
+                            if fusion:
+                                descriptions_features = model_class.adapter_descriptions(descriptions_features)
 
-                ###################### Cosine Similarity fusion ##############################################################
+                ###################### Cosine Similarity ##############################################################
                 cos_sim = torch.nn.functional.cosine_similarity(image_features.unsqueeze(1), text_features.unsqueeze(0), dim=2)
                 cos_sim = cos_sim / cos_sim.norm(dim=-1, keepdim=True)
-                # print("image cos sim: ", cos_sim)
-                # print(torch.nn.Softmax(dim=1)(cos_sim))
-                cos_sim_d = lam * torch.nn.functional.cosine_similarity(descriptions_features.unsqueeze(1), text_features.unsqueeze(0), dim=2)
-                cos_sim_d = cos_sim_d / cos_sim_d.norm(dim=-1, keepdim=True)
-                # print("cos sim d: ", cos_sim_d)
-                # print(torch.nn.Softmax(dim=1)(cos_sim_d))
-                cos_sim += cos_sim_d
-                cos_sim = cos_sim / cos_sim.norm(dim=-1, keepdim=True)
-                # print("cos sim: ", cos_sim)
-                # print(torch.nn.Softmax(dim=1)(cos_sim))
+
+                if fusion:
+                    cos_sim_d = lam * torch.nn.functional.cosine_similarity(descriptions_features.unsqueeze(1), text_features.unsqueeze(0), dim=2)
+                    cos_sim_d = cos_sim_d / cos_sim_d.norm(dim=-1, keepdim=True)
+
+                    cos_sim += cos_sim_d
+                    cos_sim = cos_sim / cos_sim.norm(dim=-1, keepdim=True)
+
                 predicted_classes = torch.argmax(cos_sim, dim=-1)        
                 ##############################################################################################################
 
-                ###############################  END  ########################################################################
                 val_loss = model_class.criterion(cos_sim, labels.to(model_class.device))
                 # val_loss = model_class.criterion(predicted_classes, labels)
                 val_losses.append(val_loss.item())
@@ -235,39 +234,39 @@ def train(model_class, epochs, train_descriptions, val_descriptions, lam) -> Non
                 model_class.metrics['val']['preds'].extend(predicted_classes.cpu().tolist())
                 model_class.metrics['val']['gts'].extend(labels.cpu().tolist())
 
-                plot = (epoch + 1) % 100 == 0
-                if plot:
-                    num_images = len(images) 
-                    num_rows = 2
-                    num_cols = 8
+                # plot = (epoch + 1) % 100 == 0
+                # if plot:
+                #     num_images = len(images) 
+                #     num_rows = 2
+                #     num_cols = 8
 
-                    fig, axes = plt.subplots(nrows=num_rows, ncols=num_cols, figsize=(30, 30))  
-                    for ax_row in axes:
-                        for ax in ax_row:
-                            ax.axis('off')
+                #     fig, axes = plt.subplots(nrows=num_rows, ncols=num_cols, figsize=(30, 30))  
+                #     for ax_row in axes:
+                #         for ax in ax_row:
+                #             ax.axis('off')
 
-                    for i in range(num_images):
-                        img = images[i].cpu().numpy().transpose((1, 2, 0))
-                        pred = predicted_classes[i]
-                        gt = labels[i]
+                #     for i in range(num_images):
+                #         img = images[i].cpu().numpy().transpose((1, 2, 0))
+                #         pred = predicted_classes[i]
+                #         gt = labels[i]
 
-                        pred_class = classes[pred]  
-                        gt_class = classes[gt]  
+                #         pred_class = classes[pred]  
+                #         gt_class = classes[gt]  
 
-                        row = i // num_cols  
-                        col = i % num_cols  
-                        ax = axes[row, col]  
-                        ax.imshow(img)
+                #         row = i // num_cols  
+                #         col = i % num_cols  
+                #         ax = axes[row, col]  
+                #         ax.imshow(img)
 
-                        hamming_distance = hamming_dist(pred, gt).item()
-                        color = interpolate_color(hamming_distance)
+                #         hamming_distance = hamming_dist(pred, gt).item()
+                #         color = interpolate_color(hamming_distance)
 
-                        ax.set_title(gt_class, fontsize=15, color="black", pad=1)
-                        ax.text(0.5, -0.02, pred_class, transform=ax.transAxes, ha='center', va='top', fontsize=15, color=color)
-                        wrapped_text = "\n".join(textwrap.wrap(f"d = {hamming_dist(pred, gt)}", width=25))
-                        ax.text(0.5, -0.2, wrapped_text, transform=ax.transAxes, ha='center', va='top', fontsize=15, color=color)
+                #         ax.set_title(gt_class, fontsize=15, color="black", pad=1)
+                #         ax.text(0.5, -0.02, pred_class, transform=ax.transAxes, ha='center', va='top', fontsize=15, color=color)
+                #         wrapped_text = "\n".join(textwrap.wrap(f"d = {hamming_dist(pred, gt)}", width=25))
+                #         ax.text(0.5, -0.2, wrapped_text, transform=ax.transAxes, ha='center', va='top', fontsize=15, color=color)
 
-                    plt.show()
+                #     plt.show()
 
         train_acc = sum([1 for gt, pred in zip(model_class.metrics['train']['gts'], model_class.metrics['train']['preds']) if gt == pred]) / len(model_class.metrics['train']['gts'])
         val_acc = sum([1 for gt, pred in zip(model_class.metrics['val']['gts'], model_class.metrics['val']['preds']) if gt == pred]) / len(model_class.metrics['val']['gts'])
@@ -288,8 +287,11 @@ def train(model_class, epochs, train_descriptions, val_descriptions, lam) -> Non
         if mean_val_loss < best_val_loss:
             best_val_loss = mean_val_loss
             torch.save(model_class.adapter_image.state_dict(), model_class.save_path)
-            torch.save(model_class.adapter_descriptions.state_dict(), model_class.save_path_descriptions)
-            print(f"Model saved at epoch {epoch+1}, with path: {model_class.save_path, model_class.save_path_descriptions}")
+            if fusion:
+                torch.save(model_class.adapter_descriptions.state_dict(), model_class.save_path_descriptions)
+                print(f"Model saved at epoch {epoch+1}, with path: {model_class.save_path, model_class.save_path_descriptions}")
+            else:
+                print(f"Model saved at epoch {epoch+1}, with path: {model_class.save_path}")
 
         model_class.writer.add_scalars('Losses', {'Train': train_loss, 'Val': mean_val_loss}, epoch)
         model_class.metrics = model_class._reset_metrics()

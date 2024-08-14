@@ -84,15 +84,15 @@ def generate_descriptions_pipe(prompt, dataset, topil, path):
 
 if __name__ == '__main__':
 
-    question = "Describe the romote in the image, not the background. For example, you can describe the orientation."
+    question = "Describe the romote in the image, not the background and hand. For example, you can describe the orientation."
 
     prompt = "USER: <image>\n" + question + "\nASSISTANT:"
     topil = ToPILImage()
 
     image_dir = 'data/remote60'
-    train_dataset = Remote60_seq(root_dir=image_dir, is_train=True)
+    # train_dataset = Remote60_seq(root_dir=image_dir, is_train=True)
     # val_dataset = Remote60_seq(root_dir=image_dir, is_val=True)
-    # test_dataset = Remote60_seq(root_dir=image_dir, is_test=True)
+    test_dataset = Remote60_seq(root_dir=image_dir, is_test=True)
 
-    generate_descriptions_pipe(prompt, train_dataset, topil, 
+    generate_descriptions_pipe(prompt, test_dataset, topil, 
                              "llava-hf/llava-1.5-7b-hf") #"llava-hf/bakLlava-v1-hf","llava-hf/llava-1.5-7b-hf"

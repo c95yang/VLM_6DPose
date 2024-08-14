@@ -16,9 +16,9 @@ from utils.misc import parse_output,calculate_mean_std
 from PIL import Image 
 import numpy as np    
 
-def test_adapter(model_class, split, train_descriptions, val_descriptions, lam, plot) -> None:
-    # model_class.clip_model.eval()  
-    model_class.blip_model.eval()
+def test_adapter(model_class, split, train_descriptions, val_descriptions, test_descriptions, lam, plot) -> None:
+    model_class.clip_model.eval()  
+    # model_class.blip_model.eval()
 
     model_class.adapter_image.eval()
     model_class.adapter_image.load_state_dict(torch.load(model_class.load_path))
@@ -35,12 +35,15 @@ def test_adapter(model_class, split, train_descriptions, val_descriptions, lam, 
         dataloader = DataLoader(val_dataset, batch_size=model_class.bs, pin_memory=True, num_workers=2)
         
     elif split == 'test':
-        test_dataset = Remote60(root_dir=model_class.image_dir, is_test=True, descriptions_file="descriptions/test_descriptions_concise.json")
-        dataloader = DataLoader(test_dataset, batch_size=model_class.bs, shuffle=False, pin_memory=True)
+        test_dataset = Remote60(root_dir=model_class.image_dir, is_test=True, descriptions_file=test_descriptions)
+        dataloader = DataLoader(test_dataset, batch_size=model_class.bs, pin_memory=True, num_workers=2)
 
     with torch.no_grad():
         for batch in dataloader:
-            images, labels, descriptions = batch
+            if split == 'test':
+                images, descriptions = batch
+            else:
+                images, labels, descriptions = batch
 
             #########################  START  ##########################################################################
 
@@ -82,7 +85,8 @@ def test_adapter(model_class, split, train_descriptions, val_descriptions, lam, 
 
             ###############################  END  ########################################################################
             model_class.metrics[split]['preds'].extend(predicted_classes.tolist())
-            model_class.metrics[split]['gts'].extend(labels.cpu().tolist())
+            if split != 'test':
+                model_class.metrics[split]['gts'].extend(labels.cpu().tolist())
 
             if plot:
                 num_images = len(images) 
@@ -97,32 +101,36 @@ def test_adapter(model_class, split, train_descriptions, val_descriptions, lam, 
                 for i in range(num_images):
                     img = images[i].cpu().numpy().transpose((1, 2, 0))
                     pred = predicted_classes[i]
-                    gt = labels[i]
-
                     pred_class = classes[pred]  
-                    gt_class = classes[gt]  
+
+                    if split != 'test':
+                        gt = labels[i]
+                        gt_class = classes[gt]  
 
                     row = i // num_cols  
                     col = i % num_cols  
                     ax = axes[row, col]  
                     ax.imshow(img)
 
-                    hamming_distance = hamming_dist(pred, gt).item()
-                    color = interpolate_color(hamming_distance)
-
-                    ax.set_title(gt_class, fontsize=15, color="black", pad=1)
-                    ax.text(0.5, -0.02, pred_class, transform=ax.transAxes, ha='center', va='top', fontsize=15, color=color)
-                    wrapped_text = "\n".join(textwrap.wrap(f"d = {hamming_dist(pred, gt)}", width=25))
-                    ax.text(0.5, -0.2, wrapped_text, transform=ax.transAxes, ha='center', va='top', fontsize=15, color=color)
+                    if split == 'test':
+                        ax.text(0.5, -0.02, pred_class, transform=ax.transAxes, ha='center', va='top', fontsize=15, color="blue")
+                    else:
+                        hamming_distance = hamming_dist(pred, gt).item()
+                        color = interpolate_color(hamming_distance)
+                        ax.text(0.5, -0.02, pred_class, transform=ax.transAxes, ha='center', va='top', fontsize=15, color=color)
+                        ax.set_title(gt_class, fontsize=15, color="black", pad=1)
+                        wrapped_text = "\n".join(textwrap.wrap(f"d = {hamming_dist(pred, gt)}", width=25))
+                        ax.text(0.5, -0.2, wrapped_text, transform=ax.transAxes, ha='center', va='top', fontsize=15, color=color)
 
                 plt.show()
+    
+    if split != 'test':
+        acc = sum([1 for gt, pred in zip(model_class.metrics[split]['gts'], model_class.metrics[split]['preds']) if gt == pred]) / len(model_class.metrics[split]['gts'])
+        print(f"Accuracy: {acc}")
+        print(model_class.metrics)
 
-    acc = sum([1 for gt, pred in zip(model_class.metrics[split]['gts'], model_class.metrics[split]['preds']) if gt == pred]) / len(model_class.metrics[split]['gts'])
-    print(f"Accuracy: {acc}")
-    print(model_class.metrics)
-
-    print(classification_report(model_class.metrics[split]['gts'], model_class.metrics[split]['preds'], target_names=classes))
-    model_class._reset_metrics()
+        print(classification_report(model_class.metrics[split]['gts'], model_class.metrics[split]['preds'], target_names=classes))
+        model_class._reset_metrics()
 
 
 # def test_adapter(model_class, split, path, plot) -> None:

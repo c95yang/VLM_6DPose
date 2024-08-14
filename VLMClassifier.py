@@ -13,7 +13,7 @@ from utils.misc import HammingLoss
 # from utils.classify import classify_zeroshot, classify_fewshotshot
 
 from BLIP.models.blip import blip_feature_extractor
-from transformers import CLIPProcessor, CLIPModel, CLIPVisionModel, CLIPImageProcessor, CLIPVisionConfig, AutoModelForCausalLM, AutoTokenizer, BitsAndBytesConfig, pipeline
+from transformers import CLIPProcessor, CLIPModel,  AutoModelForCausalLM, AutoTokenizer, BitsAndBytesConfig, pipeline
 
 import os
 os.environ["TOKENIZERS_PARALLELISM"] = "false"
@@ -34,7 +34,9 @@ class VLMClassifier:
                  lr: float, 
                  weight_decay: float,
                  image_dir: str,
-                 in_features: int
+                 in_features: int,
+                 fusion: bool,
+                 embedder: str
                  ) -> None:
         
         self.device = device
@@ -54,6 +56,8 @@ class VLMClassifier:
         self.warmup_epochs=3
         self.in_features = in_features
         self.dtype = dtype
+        self.fusion = fusion
+        self.embedder = embedder
 
         self.writer = SummaryWriter()
 
@@ -78,41 +82,37 @@ class VLMClassifier:
         # output = self.phi3pipe(messages, **generation_args) 
         # print(output[0]['generated_text']) 
 
-        # clip_model_name = 'openai/clip-vit-large-patch14-336' # 'openai/clip-vit-large-patch14-336', 'openai/clip-vit-base-patch16'
-        # self.clip_model = CLIPModel.from_pretrained(clip_model_name).to(device)
-        # self.clip_processor = CLIPProcessor.from_pretrained(clip_model_name)
-
-        # self.clip_processor = CLIPImageProcessor.from_pretrained("openai/clip-vit-base-patch16")
-        # self.clip_model = CLIPVisionModel.from_pretrained("openai/clip-vit-base-patch16").to(device)
-        # self.clip_model.requires_grad_(False)
-
-        model_url = 'https://storage.googleapis.com/sfr-vision-language-research/BLIP/models/model_base.pth'
-        self.blip_model = blip_feature_extractor(pretrained=model_url, image_size=800, vit='base').to(device)
-        self.blip_model.requires_grad_(False)
-
-        self.mm_projector = nn.Linear(self.in_features, 128).to(device)
+        if self.embedder == 'clip':
+            clip_model_name = 'openai/clip-vit-large-patch14-336' # 'openai/clip-vit-large-patch14-336', 'openai/clip-vit-base-patch16'
+            self.clip_model = CLIPModel.from_pretrained(clip_model_name).to(device)
+            self.clip_processor = CLIPProcessor.from_pretrained(clip_model_name)
+            self.clip_model.requires_grad_(False)
+        elif self.embedder == 'blip':
+            model_url = 'https://storage.googleapis.com/sfr-vision-language-research/BLIP/models/model_base.pth'
+            self.blip_model = blip_feature_extractor(pretrained=model_url, image_size=800, vit='base').to(device)
+            self.blip_model.requires_grad_(False)
 
         if self.adapter_image_type == 'mlp':
             self.adapter_image = MLPAdapter(in_features=self.in_features, hidden_features=128, dtype=self.dtype).to(device)
         elif self.adapter_image_type == 'transformer':
             self.adapter_image = TransformerAdapter(in_features=self.in_features, hidden_features=128, dtype=self.dtype).to(device)
+        self.optimizer_image = optim.Adam(self.adapter_image.parameters(), lr=self.lr, weight_decay=self.weight_decay)
+        self.scheduler_image = torch.optim.lr_scheduler.CosineAnnealingLR(self.optimizer_image, T_max=3, eta_min=1e-6)
 
-        if self.adapter_descriptions_type == 'mlp':
-            self.adapter_descriptions = MLPAdapter(in_features=self.in_features, hidden_features=128, dtype=self.dtype).to(device)
-        elif self.adapter_descriptions_type == 'transformer':
-            self.adapter_descriptions = TransformerAdapter(in_features=self.in_features, hidden_features=128, dtype=self.dtype).to(device)
+        if self.fusion:
+            if self.adapter_descriptions_type == 'mlp':
+                self.adapter_descriptions = MLPAdapter(in_features=self.in_features, hidden_features=128, dtype=self.dtype).to(device)
+            elif self.adapter_descriptions_type == 'transformer':
+                self.adapter_descriptions = TransformerAdapter(in_features=self.in_features, hidden_features=128, dtype=self.dtype).to(device)
+            self.optimizer_descriptions = optim.Adam(self.adapter_descriptions.parameters(), lr=self.lr, weight_decay=self.weight_decay)
+            self.scheduler_descriptions = torch.optim.lr_scheduler.CosineAnnealingLR(self.optimizer_descriptions, T_max=3, eta_min=1e-6)
+
+        # self.mm_projector = nn.Linear(self.in_features, 128).to(device)
 
         self.questions = self._prepare_prompt()
         self.metrics = self._reset_metrics()
-
-        self.optimizer_image = optim.Adam(self.adapter_image.parameters(), lr=self.lr, weight_decay=self.weight_decay)
-        self.optimizer_descriptions = optim.Adam(self.adapter_descriptions.parameters(), lr=self.lr, weight_decay=self.weight_decay)
-
+        
         self.criterion = nn.CrossEntropyLoss()
-        # self.criterion = HammingLoss()
-
-        self.scheduler_image = torch.optim.lr_scheduler.CosineAnnealingLR(self.optimizer_image, T_max=3, eta_min=1e-6)
-        self.scheduler_descriptions = torch.optim.lr_scheduler.CosineAnnealingLR(self.optimizer_descriptions, T_max=3, eta_min=1e-6)
         
 
     def _reset_metrics(self) -> Dict[str, Dict[str, List[int]]]:
@@ -137,20 +137,21 @@ if __name__ == '__main__':
         'save_path': 'ckpts/adapter_image.pth',
         'save_path_descriptions': 'ckpts/adapter_descriptions.pth', 
 
-        'load_path': 'ckpts/adapter_image.pth',
-        'load_path_descriptions': 'ckpts/adapter_descriptions.pth',
+        'load_path': 'ckpts/adapter_image_5.pth',
+        'load_path_descriptions': 'ckpts/adapter_descriptions_5.pth',
 
         'device': torch.device("cuda"),
         'dtype': torch.float32,
         'image_dir': 'data/remote60',
         'in_features': 768, #512 for clip base, 768 for clip large
-        # 'llava_path': "llava-hf/llava-1.5-7b-hf",
 
         'adapter_image_type': 'transformer', # 'mlp', 'transformer'
         'adapter_descriptions_type': 'transformer', # 'mlp', 'transformer'
-        'lr': 1e-6,
+        'lr': 1e-5,
         'weight_decay': 1e-4,
         'bs': 8, #16
+        'fusion': False,
+        'embedder': 'clip', #'blip', 'clip'
     }
 
     classifier = VLMClassifier(**hparams)
@@ -160,18 +161,20 @@ if __name__ == '__main__':
         'epochs': 100,
         'train_descriptions': "descriptions/train_descriptions.json",
         'val_descriptions': "descriptions/val_descriptions.json",
-        'lam': 1
+        'lam': 1,
+        'zero_shot': False,
     }
 
     train(**hparams)
 
     # hparams = {
     #     'model_class': classifier, 
-    #     'split': 'val',
+    #     'split': 'test',
     #     'train_descriptions': "descriptions/train_descriptions.json",
     #     'val_descriptions': "descriptions/val_descriptions.json",
+    #     'test_descriptions': "descriptions/test_descriptions.json",
     #     'lam': 1,
-    #     'plot': False
+    #     'plot': True
     # }
 
     # test_adapter(**hparams)

@@ -1,6 +1,6 @@
 import torch
 import torch.nn as nn
-from utils.positions import classes, class_to_coding
+from .positions import classes, class_to_coding
 import numpy as np
 
 import psutil
