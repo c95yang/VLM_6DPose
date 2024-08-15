@@ -151,7 +151,7 @@ if __name__ == '__main__':
         'weight_decay': 1e-4,
         'bs': 8, #16
         'fusion': False,
-        'embedder': 'clip', #'blip', 'clip'
+        'embedder': 'blip', #'blip', 'clip'
     }
 
     classifier = VLMClassifier(**hparams)
@@ -162,7 +162,7 @@ if __name__ == '__main__':
         'train_descriptions': "descriptions/train_descriptions.json",
         'val_descriptions': "descriptions/val_descriptions.json",
         'lam': 1,
-        'zero_shot': False,
+        'zeroshot': False,
     }
 
     train(**hparams)

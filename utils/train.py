@@ -28,20 +28,17 @@ def train(model_class, epochs, train_descriptions, val_descriptions, lam, zerosh
 
     for epoch in range(epochs):
         # Training loop
-        model_class.adapter_image.train()
-        model_class.optimizer_image.zero_grad()
-
-        if fusion:
-            model_class.adapter_descriptions.train()
-            model_class.optimizer_descriptions.zero_grad()
-
-        with torch.no_grad():
-            if model_class.embedder == 'clip':
+        if not zeroshot:
+            model_class.adapter_image.train()
+            model_class.optimizer_image.zero_grad()
+            if fusion:
+                model_class.adapter_descriptions.train()
+                model_class.optimizer_descriptions.zero_grad()
+        
+        if model_class.embedder == 'clip':
+            with torch.no_grad():
                 text_inputs = model_class.clip_processor(text=model_class.questions, return_tensors="pt", padding=True).to(model_class.device)
                 text_features = model_class.clip_model.get_text_features(**text_inputs)
-                text_features = text_features / text_features.norm(dim=-1, keepdim=True).to(model_class.device)
-            elif model_class.embedder == 'blip':
-                text_features = model_class.blip_model(images, model_class.questions, mode='text')[:,0]
                 text_features = text_features / text_features.norm(dim=-1, keepdim=True).to(model_class.device)
 
         for batch in tqdm(train_loader, desc=f"Epoch {epoch+1}/{epochs}"):
@@ -66,18 +63,23 @@ def train(model_class, epochs, train_descriptions, val_descriptions, lam, zerosh
             elif model_class.embedder == 'blip':
                 with torch.no_grad():
                     images = images.to(model_class.device)
+
+                    text_features = model_class.blip_model(images, model_class.questions, mode='text')[:,0]
+                    text_features = text_features / text_features.norm(dim=-1, keepdim=True).to(model_class.device)
+
                     image_features = model_class.blip_model(images, descriptions, mode='image')
                     image_features = image_features.mean(dim=1)
                     image_features = image_features / image_features.norm(p=2, dim=-1, keepdim=True).to(model_class.device)
+
                     if fusion:
                         descriptions_features = model_class.blip_model(images, descriptions, mode='text')
                         descriptions_features = descriptions_features.mean(dim=1)
                         descriptions_features = descriptions_features / descriptions_features.norm(p=2, dim=-1, keepdim=True).to(model_class.device)
 
-                    if not zeroshot:
-                        image_features = model_class.adapter_image(image_features)
-                        if fusion:
-                            descriptions_features = model_class.adapter_descriptions(descriptions_features)
+                if not zeroshot:
+                    image_features = model_class.adapter_image(image_features)
+                    if fusion:
+                        descriptions_features = model_class.adapter_descriptions(descriptions_features)
 
             ###################### Cosine Similarity ##############################################################
             cos_sim = torch.nn.functional.cosine_similarity(image_features.unsqueeze(1), text_features.unsqueeze(0), dim=2)
@@ -173,9 +175,10 @@ def train(model_class, epochs, train_descriptions, val_descriptions, lam, zerosh
             model_class.metrics['train']['gts'].extend(labels.cpu().tolist())
 
         # Validation loop
-        model_class.adapter_image.eval() 
-        if fusion:
-            model_class.adapter_descriptions.eval() 
+        if not zeroshot:
+            model_class.adapter_image.eval() 
+            if fusion:
+                model_class.adapter_descriptions.eval() 
         val_losses = []
         with torch.no_grad():
             for batch in tqdm(val_loader, desc=f"Validation {epoch+1}/{epochs}"):
@@ -200,6 +203,10 @@ def train(model_class, epochs, train_descriptions, val_descriptions, lam, zerosh
                 elif model_class.embedder == 'blip':
                     with torch.no_grad():
                         images = images.to(model_class.device)
+
+                        text_features = model_class.blip_model(images, model_class.questions, mode='text')[:,0]
+                        text_features = text_features / text_features.norm(dim=-1, keepdim=True).to(model_class.device)
+
                         image_features = model_class.blip_model(images, descriptions, mode='image')
                         image_features = image_features.mean(dim=1)
                         image_features = image_features / image_features.norm(p=2, dim=-1, keepdim=True).to(model_class.device)
@@ -208,10 +215,10 @@ def train(model_class, epochs, train_descriptions, val_descriptions, lam, zerosh
                             descriptions_features = descriptions_features.mean(dim=1)
                             descriptions_features = descriptions_features / descriptions_features.norm(p=2, dim=-1, keepdim=True).to(model_class.device)
 
-                        if not zeroshot:
-                            image_features = model_class.adapter_image(image_features)
-                            if fusion:
-                                descriptions_features = model_class.adapter_descriptions(descriptions_features)
+                    if not zeroshot:
+                        image_features = model_class.adapter_image(image_features)
+                        if fusion:
+                            descriptions_features = model_class.adapter_descriptions(descriptions_features)
 
                 ###################### Cosine Similarity ##############################################################
                 cos_sim = torch.nn.functional.cosine_similarity(image_features.unsqueeze(1), text_features.unsqueeze(0), dim=2)
@@ -284,7 +291,7 @@ def train(model_class, epochs, train_descriptions, val_descriptions, lam, zerosh
         print(f"Epoch {epoch+1}, validation loss: {mean_val_loss}, train_acc: {train_acc}, val_acc: {val_acc}")
 
 
-        if mean_val_loss < best_val_loss:
+        if mean_val_loss < best_val_loss and not zeroshot:
             best_val_loss = mean_val_loss
             torch.save(model_class.adapter_image.state_dict(), model_class.save_path)
             if fusion:
