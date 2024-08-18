@@ -31,6 +31,7 @@ def log_memory_usage():
         print(stat)
 
 def parse_output(output: str) -> str:
+    # print(output.split("ASSISTANT:")[-1])
     return output.split("ASSISTANT:")[-1].strip()
 
 def calculate_mean_std(loader):

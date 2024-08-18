@@ -4,6 +4,7 @@ from sklearn.metrics import classification_report
 from utils.datasets import Remote60
 from torch.utils.data import DataLoader
 from torchvision.transforms import ToPILImage
+from torchvision import transforms
 from transformers import BitsAndBytesConfig, pipeline
 #import transformers
 #print(transformers.__file__)
@@ -16,20 +17,29 @@ from utils.misc import parse_output,calculate_mean_std
 from PIL import Image 
 import numpy as np    
 
-def test_adapter(model_class, split, train_descriptions, val_descriptions, test_descriptions, lam, plot) -> None:
-    model_class.clip_model.eval()  
-    # model_class.blip_model.eval()
+def test_adapter(model_class, split, train_descriptions, val_descriptions, test_descriptions, lam, plot, zeroshot,load_path, load_path_descriptions) -> None:
+    fusion = model_class.fusion
 
-    model_class.adapter_image.eval()
-    model_class.adapter_image.load_state_dict(torch.load(model_class.load_path))
-    model_class.adapter_descriptions.eval()
-    model_class.adapter_descriptions.load_state_dict(torch.load(model_class.load_path_descriptions))
+    if model_class.embedder == 'clip':
+        model_class.clip_model.eval()  
+        with torch.no_grad():
+            text_inputs = model_class.clip_processor(text=model_class.questions, return_tensors="pt", padding=True).to(model_class.device)
+            text_features = model_class.clip_model.get_text_features(**text_inputs)
+            text_features = text_features / text_features.norm(dim=-1, keepdim=True).to(model_class.device)
+    elif model_class.embedder == 'blip':
+        model_class.blip_model.eval()
+
+    if not zeroshot:
+        model_class.adapter_image.eval() 
+        model_class.adapter_image.load_state_dict(torch.load(load_path))
+        if fusion:
+            model_class.adapter_descriptions.eval() 
+            model_class.adapter_descriptions.load_state_dict(torch.load(load_path_descriptions))
 
     if split == 'train':
         train_dataset = Remote60(root_dir=model_class.image_dir, is_train=True, descriptions_file=train_descriptions)
         dataloader = DataLoader(train_dataset, batch_size=model_class.bs, pin_memory=True, num_workers=2) 
-        # calculate_mean_std(dataloader)
-        # return
+
     elif split == 'val':
         val_dataset = Remote60(root_dir=model_class.image_dir, is_val=True, descriptions_file=val_descriptions)
         dataloader = DataLoader(val_dataset, batch_size=model_class.bs, pin_memory=True, num_workers=2)
@@ -45,45 +55,56 @@ def test_adapter(model_class, split, train_descriptions, val_descriptions, test_
             else:
                 images, labels, descriptions = batch
 
-            #########################  START  ##########################################################################
+            if model_class.embedder == 'clip':
+                with torch.no_grad():
+                    if fusion:
+                        descriptions_inputs = model_class.clip_processor(text=descriptions, return_tensors="pt", padding=True, truncation=True, max_length=77).to(model_class.device)
+                        descriptions_embeds = model_class.clip_model.get_text_features(**descriptions_inputs)
+                        descriptions_features = descriptions_embeds / descriptions_embeds.norm(dim=-1, keepdim=True)
+                    
+                    inputs = model_class.clip_processor(images=images, return_tensors="pt", do_rescale=False).to(model_class.device)
+                    image_features = model_class.clip_model.get_image_features(**inputs)
+                    image_features = image_features / image_features.norm(dim=-1, keepdim=True).to(model_class.device)
 
-            ###################### blip embeds ########################################################################
-            with torch.no_grad():
-                images = images.to(model_class.device)
-                image_features = model_class.blip_model(images, descriptions, mode='image')
-                image_features = image_features.mean(dim=1)
-                image_features = image_features / image_features.norm(p=2, dim=-1, keepdim=True).to(model_class.device)
-            image_features = model_class.adapter_image(image_features)
+                if not zeroshot:
+                    image_features = model_class.adapter_image(image_features)
+                    if fusion:
+                        descriptions_features = model_class.adapter_descriptions(descriptions_features)
 
-            with torch.no_grad():
-                descriptions_features = model_class.blip_model(images, descriptions, mode='text')
-                descriptions_features = descriptions_features.mean(dim=1)
-                descriptions_features = descriptions_features / descriptions_features.norm(p=2, dim=-1, keepdim=True).to(model_class.device)
-            descriptions_features = model_class.adapter_descriptions(descriptions_features)
+            elif model_class.embedder == 'blip':
+                with torch.no_grad():
+                    images = images.to(model_class.device)
 
-            with torch.no_grad():
-                text_features = model_class.blip_model(images, model_class.questions, mode='text')[:,0]
-                text_features = text_features / text_features.norm(dim=-1, keepdim=True).to(model_class.device)
-            ##############################################################################################################
+                    text_features = model_class.blip_model(images, model_class.questions, mode='text')[:,0]
+                    text_features = text_features / text_features.norm(dim=-1, keepdim=True).to(model_class.device)
 
+                    image_features = model_class.blip_model(images, descriptions, mode='image')
+                    image_features = image_features.mean(dim=1)
+                    image_features = image_features / image_features.norm(p=2, dim=-1, keepdim=True).to(model_class.device)
+                    if fusion:
+                        descriptions_features = model_class.blip_model(images, descriptions, mode='text')
+                        descriptions_features = descriptions_features.mean(dim=1)
+                        descriptions_features = descriptions_features / descriptions_features.norm(p=2, dim=-1, keepdim=True).to(model_class.device)
 
-            ###################### Cosine Similarity fusion ##############################################################
+                if not zeroshot:
+                    image_features = model_class.adapter_image(image_features)
+                    if fusion:
+                        descriptions_features = model_class.adapter_descriptions(descriptions_features)
+
+            ###################### Cosine Similarity ##############################################################
             cos_sim = torch.nn.functional.cosine_similarity(image_features.unsqueeze(1), text_features.unsqueeze(0), dim=2)
             cos_sim = cos_sim / cos_sim.norm(dim=-1, keepdim=True)
-            # print("image cos sim: ", cos_sim)
-            # print(torch.nn.Softmax(dim=1)(cos_sim))
-            cos_sim_d = lam * torch.nn.functional.cosine_similarity(descriptions_features.unsqueeze(1), text_features.unsqueeze(0), dim=2)
-            cos_sim_d = cos_sim_d / cos_sim_d.norm(dim=-1, keepdim=True)
-            # print("cos sim d: ", cos_sim_d)
-            # print(torch.nn.Softmax(dim=1)(cos_sim_d))
-            cos_sim += cos_sim_d
-            cos_sim = cos_sim / cos_sim.norm(dim=-1, keepdim=True)
-            # print("cos sim: ", cos_sim)
-            # print(torch.nn.Softmax(dim=1)(cos_sim))
+
+            if fusion:
+                cos_sim_d = lam * torch.nn.functional.cosine_similarity(descriptions_features.unsqueeze(1), text_features.unsqueeze(0), dim=2)
+                cos_sim_d = cos_sim_d / cos_sim_d.norm(dim=-1, keepdim=True)
+
+                cos_sim += cos_sim_d
+                cos_sim = cos_sim / cos_sim.norm(dim=-1, keepdim=True)
+
             predicted_classes = torch.argmax(cos_sim, dim=-1)        
             ##############################################################################################################
 
-            ###############################  END  ########################################################################
             model_class.metrics[split]['preds'].extend(predicted_classes.tolist())
             if split != 'test':
                 model_class.metrics[split]['gts'].extend(labels.cpu().tolist())
@@ -133,186 +154,112 @@ def test_adapter(model_class, split, train_descriptions, val_descriptions, test_
         model_class._reset_metrics()
 
 
-# def test_adapter(model_class, split, path, plot) -> None:
-#     if split == 'val':
-#         val_dataset = Remote14(root_dir=model_class.image_dir, is_val=True)
-#         dataloader = DataLoader(val_dataset, batch_size=model_class.bs, shuffle=False, pin_memory=True)
-#     elif split == 'test':
-#         test_dataset = Remote14(root_dir=model_class.image_dir, is_test=True)
-#         dataloader = DataLoader(test_dataset, batch_size=model_class.bs, shuffle=False, pin_memory=True)
-#     elif split == 'train':
-#         train_dataset = Remote14(root_dir=model_class.image_dir, is_train=True)
-#         dataloader = DataLoader(train_dataset, batch_size=model_class.bs, shuffle=True, pin_memory=True)
+def inference_single_image(model_class, image_path, lam, plot, zeroshot,load_path, load_path_descriptions, llava_path) -> None:
+    desired_size = (800,800)
+    transform = transforms.Compose([
+            # transforms.CenterCrop((int(self.desired_size[0] * 1), int(self.desired_size[1] * 1))),
+            transforms.Resize(desired_size),
+            transforms.ToTensor()
+        ])
+    fusion = model_class.fusion
 
-#     question = "Tell me from which direction is the remote in the image observed, \
-#     using options such as front, back, left, right, top, bottom, and their combinations. Provide several options if necessary."
+    if model_class.embedder == 'clip':
+        model_class.clip_model.eval()  
+        with torch.no_grad():
+            text_inputs = model_class.clip_processor(text=model_class.questions, return_tensors="pt", padding=True).to(model_class.device)
+            text_features = model_class.clip_model.get_text_features(**text_inputs)
+            text_features = text_features / text_features.norm(dim=-1, keepdim=True).to(model_class.device)
+    elif model_class.embedder == 'blip':
+        model_class.blip_model.eval()
 
-#     prompt = "USER: <image>\n" + question + "\nASSISTANT:"
-#     topil = ToPILImage()
+    if not zeroshot:
+        model_class.adapter_image.eval() 
+        model_class.adapter_image.load_state_dict(torch.load(load_path))
+        if fusion:
+            model_class.adapter_descriptions.eval() 
+            model_class.adapter_descriptions.load_state_dict(torch.load(load_path_descriptions))
 
-#     quantization_config = BitsAndBytesConfig(
-#         load_in_4bit=True,
-#         bnb_4bit_compute_dtype=torch.float16
-#     )
-#     pipe = pipeline("image-to-text", model=path, model_kwargs={"quantization_config": quantization_config}) 
-
-#     model_class.clip_model.eval()
-
-#     model_class.adapter_image.eval()
-#     model_class.adapter_image.load_state_dict(torch.load(model_class.load_path))
-#     model_class.adapter_descriptions.eval()
-#     model_class.adapter_descriptions.load_state_dict(torch.load(model_class.load_path_descriptions))
-
-#     with torch.no_grad():
-#         for batch in dataloader:
-#             images, labels = batch
-
-#             ###################### images embeds ########################################################################
-#             inputs = model_class.processor(images=images, return_tensors="pt", do_rescale=False).to(model_class.device)
-#             embeds = model_class.clip_model.get_image_features(**inputs)
-#             embeds = embeds / embeds.norm(p=2, dim=-1, keepdim=True)
-#             image_features = model_class.adapter_image(embeds)
-#             ##############################################################################################################
-
-#             ########### llava descriptions embeds ########################################################################
-#             images = [topil(image) for image in images]
-
-#             descriptions = pipe(images, prompt=prompt, generate_kwargs={"max_new_tokens": 77, "min_new_tokens":50})
-
-#             descriptions = [parse_output(description[0]["generated_text"]) for description in descriptions]
-#             descriptions_inputs = model_class.processor(text=descriptions, return_tensors="pt", padding=True, truncation=True, max_length=77).to(model_class.device)
-#             descriptions_embeds = model_class.clip_model.get_text_features(**descriptions_inputs)
-#             descriptions_embeds = descriptions_embeds / descriptions_embeds.norm(dim=-1, keepdim=True)
-#             descriptions_features = model_class.adapter_descriptions(descriptions_embeds)
-#             ##############################################################################################################
-
-#             ###################### questions embeds ######################################################################
-#             text_inputs = model_class.processor(text=model_class.questions, return_tensors="pt", padding=True).to(model_class.device)
-#             text_features = model_class.clip_model.get_text_features(**text_inputs)
-#             text_features = text_features / text_features.norm(dim=-1, keepdim=True)
-#             ##############################################################################################################
-
-#             ###################### Cosine Similarity fusion ##############################################################
-#             cos_sim_image = torch.matmul(image_features, text_features.transpose(0, 1))
-#             #print(f"cos_sim_image: {cos_sim_image}")
-#             cos_sim_text= torch.matmul(descriptions_features, text_features.transpose(0, 1))
-#             #print(f"cos_sim_text: {cos_sim_text}")
-#             cos_sim = cos_sim_image + cos_sim_text
-#             #print(f"cos_sim: {cos_sim}")
-#             predicted_classes = torch.argmax(cos_sim, dim=-1)
-#             ##############################################################################################################
-
-#             model_class.metrics[split]['preds'].extend(predicted_classes.tolist())
-#             model_class.metrics[split]['gts'].extend(labels.cpu().tolist())
-
-
-#             acc = sum([1 for gt, pred in zip(model_class.metrics[split]['gts'], model_class.metrics[split]['preds']) if gt == pred]) / len(model_class.metrics[split]['gts'])
-#             print(f"Accuracy: {acc}")
-#             print(model_class.metrics)
-
-#             if plot:
-#                 num_images = len(images) 
-#                 num_rows = 2
-#                 num_cols = 8
-
-#                 fig, axes = plt.subplots(nrows=num_rows, ncols=num_cols, figsize=(20, 20))  
-#                 for ax_row in axes:
-#                     for ax in ax_row:
-#                         ax.axis('off')
-
-#                 for i in range(num_images):
-#                     # img = images[i].cpu().numpy().transpose((1, 2, 0))
-#                     img = images[i]
-
-#                     pred_label = model_class.classes[predicted_classes[i]]
-#                     gt_label = model_class.classes[labels[i].cpu().item()]  
-
-#                     row = i // num_cols  
-#                     col = i % num_cols  
-#                     ax = axes[row, col]  
-#                     ax.imshow(img)
-#                     ax.set_title(pred_label, fontsize=10, color="green" if pred_label == gt_label else "red", pad=1)
-#                     ax.text(0.5, -0.02, gt_label, transform=ax.transAxes, ha='center', va='top', fontsize=10, color="black")
-#                     wrapped_text = "\n".join(textwrap.wrap(descriptions[i], width=25))
-#                     ax.text(0.5, -0.2, wrapped_text, transform=ax.transAxes, ha='center', va='top', fontsize=10, color="black")
-
-#                 plt.show()
-
-#     print(classification_report(model_class.metrics[split]['gts'], model_class.metrics[split]['preds'], target_names=model_class.classes))
-#     model_class._reset_metrics()
-
-
-def inference_single_image(model_class, image_path, plot) -> None:
-    model_class.clip_model.eval()
-
-    model_class.adapter_image.eval()
-    model_class.adapter_image.load_state_dict(torch.load(model_class.load_path))
-    model_class.adapter_descriptions.eval()
-    model_class.adapter_descriptions.load_state_dict(torch.load(model_class.load_path_descriptions))
-
-    question = "Tell me from which direction is the remote in the image observed, \
-    using options such as front, back, left, right, top, bottom, and their combinations. Provide several options if necessary."
+    question = "Describe the romote in the image, not the background and hand. For example, you can describe the orientation."
     # question = "describe the image in the image."
     prompt = "USER: <image>\n" + question + "\nASSISTANT:"
-
-    # torch.set_default_dtype(torch.float16)
 
     quantization_config = BitsAndBytesConfig(
         load_in_4bit=True,
         bnb_4bit_compute_dtype=torch.float16,
         low_cpu_mem_usage=True
     )
-    pipe = pipeline("image-to-text", model=model_class.llava_path, model_kwargs={"quantization_config": quantization_config}) 
+    pipe = pipeline("image-to-text", model=llava_path, model_kwargs={"quantization_config": quantization_config}) 
 
-    m = pipe.model
-    for name, param in m.named_parameters():
-        print(f"Pipeline Model Parameter: {name}, Dtype: {param.dtype}")
+    # m = pipe.model
+    # for name, param in m.named_parameters():
+    #     print(f"Pipeline Model Parameter: {name}, Dtype: {param.dtype}")
 
     with torch.no_grad():
-        img = Image.open('data/remote14/test/13/TopRightBack.png')
+        img = Image.open(image_path)
 
         description = pipe(img, prompt=prompt, generate_kwargs={"max_new_tokens": 77})
         # print(pipe.model)
         description = parse_output(description[0]["generated_text"]) 
-        print(description)
+        image = transform(img.convert("RGB")).unsqueeze(0).to(model_class.device)
 
-    description = parse_output(description[0]["generated_text"]) 
-    #print(description)
+    if model_class.embedder == 'clip':
+        with torch.no_grad():
+            if fusion:
+                descriptions_inputs = model_class.clip_processor(text=description, return_tensors="pt", padding=True, truncation=True, max_length=77).to(model_class.device)
+                descriptions_embeds = model_class.clip_model.get_text_features(**descriptions_inputs)
+                descriptions_features = descriptions_embeds / descriptions_embeds.norm(dim=-1, keepdim=True)
+            
+            inputs = model_class.clip_processor(images=image, return_tensors="pt", do_rescale=False).to(model_class.device)
+            image_features = model_class.clip_model.get_image_features(**inputs)
+            image_features = image_features / image_features.norm(dim=-1, keepdim=True).to(model_class.device)
 
-    ###################### images embeds ########################################################################
-    inputs = model_class.processor(images=img, return_tensors="pt", do_rescale=False).to(model_class.device)
-    embeds = model_class.clip_model.get_image_features(**inputs)
-    embeds = embeds / embeds.norm(p=2, dim=-1, keepdim=True)
-    image_features = model_class.adapter_image(embeds)
-    ##############################################################################################################
+        if not zeroshot:
+            image_features = model_class.adapter_image(image_features)
+            if fusion:
+                descriptions_features = model_class.adapter_descriptions(descriptions_features)
 
-    ########### llava descriptions embeds ########################################################################
-    descriptions_inputs = model_class.processor(text=description, return_tensors="pt", padding=True, truncation=True, max_length=77).to(model_class.device)
-    descriptions_embeds = model_class.clip_model.get_text_features(**descriptions_inputs)
-    descriptions_embeds = descriptions_embeds / descriptions_embeds.norm(dim=-1, keepdim=True)
-    descriptions_features = model_class.adapter_descriptions(descriptions_embeds)
-    ##############################################################################################################
+    elif model_class.embedder == 'blip':
+        with torch.no_grad():
+            text_features = model_class.blip_model(image, model_class.questions, mode='text')[:,0]
+            text_features = text_features / text_features.norm(dim=-1, keepdim=True).to(model_class.device)
 
-    ###################### questions embeds ######################################################################
-    text_inputs = model_class.processor(text=model_class.questions, return_tensors="pt", padding=True).to(model_class.device)
-    text_features = model_class.clip_model.get_text_features(**text_inputs)
-    text_features = text_features / text_features.norm(dim=-1, keepdim=True)
-    ##############################################################################################################
+            image_features = model_class.blip_model(image, description, mode='image')
+            image_features = image_features.mean(dim=1)
+            image_features = image_features / image_features.norm(p=2, dim=-1, keepdim=True).to(model_class.device)
+            if fusion:
+                descriptions_features = model_class.blip_model(image, description, mode='text')
+                descriptions_features = descriptions_features.mean(dim=1)
+                descriptions_features = descriptions_features / descriptions_features.norm(p=2, dim=-1, keepdim=True).to(model_class.device)
 
-    ###################### Cosine Similarity fusion ##############################################################
-    cos_sim_image = torch.matmul(image_features, text_features.transpose(0, 1))
-    #print(f"cos_sim_image: {cos_sim_image}")
-    cos_sim_text= torch.matmul(descriptions_features, text_features.transpose(0, 1))
-    #print(f"cos_sim_text: {cos_sim_text}")
-    cos_sim = cos_sim_image + cos_sim_text
-    #print(f"cos_sim: {cos_sim}")
-    predicted_classes = torch.argmax(cos_sim, dim=-1)
+        if not zeroshot:
+            image_features = model_class.adapter_image(image_features)
+            if fusion:
+                descriptions_features = model_class.adapter_descriptions(descriptions_features)
+
+    ###################### Cosine Similarity ##############################################################
+    cos_sim = torch.nn.functional.cosine_similarity(image_features.unsqueeze(1), text_features.unsqueeze(0), dim=2)
+    cos_sim = cos_sim / cos_sim.norm(dim=-1, keepdim=True)
+
+    if fusion:
+        cos_sim_d = lam * torch.nn.functional.cosine_similarity(descriptions_features.unsqueeze(1), text_features.unsqueeze(0), dim=2)
+        cos_sim_d = cos_sim_d / cos_sim_d.norm(dim=-1, keepdim=True)
+
+        cos_sim += cos_sim_d
+        cos_sim = cos_sim / cos_sim.norm(dim=-1, keepdim=True)
+
+    predicted_classes = torch.argmax(cos_sim, dim=-1)        
     ##############################################################################################################
 
     if plot:
+        img_width, img_height = img.size
+        max_char_width = 100  
+        wrapped_description = "\n".join(textwrap.wrap(description, max_char_width))
+        plt.figure(figsize=(10, 8))
         plt.imshow(img)
-        pred_label = model_class.classes[predicted_classes.item()]
-        plt.title(pred_label, fontsize=10, color="blue", pad=1)
-        plt.text(1, -8, description, ha='center', va='top', fontsize=10, color="black")
+        pred_label = classes[predicted_classes.item()]
+        plt.title(pred_label, fontsize=20, color="blue", pad=10, fontweight='bold')
+        plt.text(img_width // 2, img_height + 10, wrapped_description, ha='center', va='top', fontsize=12, color="black", fontstyle='italic')
+        plt.axis('off')
+        plt.tight_layout()
         plt.show()
 

@@ -27,9 +27,7 @@ class VLMClassifier:
                  bs: int, 
                  adapter_image_type: str, 
                  adapter_descriptions_type: str, 
-                 load_path: str, 
                  save_path: str, 
-                 load_path_descriptions: str,
                  save_path_descriptions: str,
                  lr: float, 
                  weight_decay: float,
@@ -46,9 +44,7 @@ class VLMClassifier:
         self.bs = bs
         self.adapter_image_type = adapter_image_type
         self.adapter_descriptions_type = adapter_descriptions_type
-        self.load_path = load_path
         self.save_path = save_path
-        self.load_path_descriptions = load_path_descriptions
         self.save_path_descriptions = save_path_descriptions
         self.lr = lr
         self.weight_decay = weight_decay
@@ -136,47 +132,57 @@ if __name__ == '__main__':
     hparams = {
         'save_path': 'ckpts/adapter_image.pth',
         'save_path_descriptions': 'ckpts/adapter_descriptions.pth', 
-
-        'load_path': 'ckpts/adapter_image_5.pth',
-        'load_path_descriptions': 'ckpts/adapter_descriptions_5.pth',
-
         'device': torch.device("cuda"),
         'dtype': torch.float32,
         'image_dir': 'data/remote60',
         'in_features': 768, #512 for clip base, 768 for clip large
-
         'adapter_image_type': 'transformer', # 'mlp', 'transformer'
         'adapter_descriptions_type': 'transformer', # 'mlp', 'transformer'
         'lr': 1e-5,
         'weight_decay': 1e-4,
-        'bs': 8, #16
-        'fusion': False,
-        'embedder': 'blip', #'blip', 'clip'
+        'bs': 10, #16
+        'fusion': True,
+        'embedder': 'clip', #'blip', 'clip'
     }
 
     classifier = VLMClassifier(**hparams)
 
-    hparams = {
-        'model_class': classifier, 
-        'epochs': 100,
-        'train_descriptions': "descriptions/train_descriptions.json",
-        'val_descriptions': "descriptions/val_descriptions.json",
-        'lam': 1,
-        'zeroshot': False,
-    }
+    # hparams = {
+    #     'model_class': classifier, 
+    #     'epochs': 100,
+    #     'train_descriptions': "descriptions/train_descriptions.json",
+    #     'val_descriptions': "descriptions/val_descriptions.json",
+    #     'lam': 1,
+    #     'zeroshot': False,
+    # }
 
-    train(**hparams)
+    # train(**hparams)
 
     # hparams = {
     #     'model_class': classifier, 
-    #     'split': 'test',
+    #     'split': 'val',
     #     'train_descriptions': "descriptions/train_descriptions.json",
     #     'val_descriptions': "descriptions/val_descriptions.json",
     #     'test_descriptions': "descriptions/test_descriptions.json",
     #     'lam': 1,
-    #     'plot': True
+    #     'plot': True,
+    #     'zeroshot': False,
+    #     'load_path': 'ckpts/adapter_image_blip_imagetext.pth',
+    #     'load_path_descriptions': 'ckpts/adapter_descriptions_clip_imagetext.pth',
     # }
 
     # test_adapter(**hparams)
-    # inference_single_image(model_class=classifier, image_path='data/remote14/train/remote-comfee/BottomRightBack.png', plot=True)
+
+    hparams = {
+        'model_class': classifier, 
+        'image_path': 'data/remote60/test/WhatsApp Image 2024-08-13 at 15.45.51 (5).jpeg',
+        'lam': 1,
+        'plot': True,
+        'zeroshot': False,
+        'load_path': 'ckpts/adapter_image_clip_imagetext.pth',
+        'load_path_descriptions': 'ckpts/adapter_descriptions_clip_imagetext.pth',
+        'llava_path': "llava-hf/llava-1.5-7b-hf"
+    }
+
+    inference_single_image(**hparams)
 

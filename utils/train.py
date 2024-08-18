@@ -23,6 +23,10 @@ def train(model_class, epochs, train_descriptions, val_descriptions, lam, zerosh
     best_val_loss = float('inf')
     if model_class.embedder == 'clip':
         model_class.clip_model.eval()  
+        with torch.no_grad():
+                text_inputs = model_class.clip_processor(text=model_class.questions, return_tensors="pt", padding=True).to(model_class.device)
+                text_features = model_class.clip_model.get_text_features(**text_inputs)
+                text_features = text_features / text_features.norm(dim=-1, keepdim=True).to(model_class.device)
     elif model_class.embedder == 'blip':
         model_class.blip_model.eval()
 
@@ -34,12 +38,6 @@ def train(model_class, epochs, train_descriptions, val_descriptions, lam, zerosh
             if fusion:
                 model_class.adapter_descriptions.train()
                 model_class.optimizer_descriptions.zero_grad()
-        
-        if model_class.embedder == 'clip':
-            with torch.no_grad():
-                text_inputs = model_class.clip_processor(text=model_class.questions, return_tensors="pt", padding=True).to(model_class.device)
-                text_features = model_class.clip_model.get_text_features(**text_inputs)
-                text_features = text_features / text_features.norm(dim=-1, keepdim=True).to(model_class.device)
 
         for batch in tqdm(train_loader, desc=f"Epoch {epoch+1}/{epochs}"):
             images, labels, descriptions = batch
