@@ -1,25 +1,16 @@
 ## Environment
-
 ~~~
 python 3.9 cuda 118 recommended
 pip install -r requirements.txt
 ~~~
 
-## Train
-
+## Train/Test/Demo
 ~~~
 python VLMClassifier.py
 ~~~
 
 ## Architecture
 ![Architecture](./diagrams/architecture.svg)
-
-
-## Evaluation CLIP
-![CLIP](./diagrams/clip_test.svg)
-
-## Evaluation BLIP
-![BLIP](./diagrams/blip_test.svg)
 
 ## Results on Validation Data
 | Nr. | VLM  | Method  | Features       | Acc_3↑ | Acc_2↑ | Acc_1↑ |
@@ -36,6 +27,12 @@ python VLMClassifier.py
 - **Acc_3** (all 3 directions correct)
 - **Acc_2** (at least 2 directions correct)
 - **Acc_1** (at least 1 direction correct)
+
+## Manual Evaluation CLIP
+![CLIP](./diagrams/clip_test.svg)
+
+## Manual Evaluation BLIP
+![BLIP](./diagrams/blip_test.svg)
 
 ## Demo "single image inference"
 ![single image inference](./diagrams/demo.png)
